@@ -35,7 +35,13 @@ export interface ElementDef {
 }
 
 export const SOURCE = { repository: raw.source, commit: raw.commit, license: raw.license };
-export const ELEMENTS: ElementDef[] = raw.elements as ElementDef[];
+const real = raw.elements as ElementDef[];
+/** Number of element ids that exist upstream; ids up to PT_NUM exist as disabled placeholders, as in the original table. */
+export const ELEMENT_COUNT = real.length;
+export const ELEMENTS: ElementDef[] = [...real];
+for (let id = real.length; id < PT_NUM; id++) {
+  ELEMENTS.push({ ...real[0], id, key: '', name: '', description: '', Enabled: 0, MenuVisible: 0, hasUpdate: false, hasCreate: false });
+}
 
 const C = raw.constants as Record<string, number>;
 export const TYPE_PART = C.TYPE_PART, TYPE_LIQUID = C.TYPE_LIQUID, TYPE_SOLID = C.TYPE_SOLID, TYPE_GAS = C.TYPE_GAS,
@@ -47,7 +53,7 @@ export const TYPE_PART = C.TYPE_PART, TYPE_LIQUID = C.TYPE_LIQUID, TYPE_SOLID = 
 export const FLAG_STAGNANT = 1, FLAG_SKIPMOVE = 2, FLAG_MOVABLE = 8;
 
 /** Element ids by PT_ name, e.g. PT.WATR. */
-export const PT: Record<string, number> = Object.fromEntries(ELEMENTS.map(e => [e.key, e.id]));
+export const PT: Record<string, number> = Object.fromEntries(real.map(e => [e.key, e.id]));
 export const PT_NONE = 0;
 
 /** can_move[moving][destination]: 0 no move/bounce, 1 swap, 2 share space, 3 varies. Mirrors SimulationData::init_can_move. */

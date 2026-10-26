@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { ELEMENTS, SOURCE } from '../src/powder/elements';
+import { ELEMENTS, ELEMENT_COUNT, SOURCE } from '../src/powder/elements';
 import { BEHAVIORS, ENGINE_SIDE_UNPORTED, PARTIAL_PORTS } from '../src/powder/behaviors';
 
 const SECTIONS = ['Walls', 'Electronics', 'Powered', 'Sensors', 'Force', 'Explosives', 'Gases', 'Liquids', 'Powders', 'Solids', 'Radioactive', 'Special', 'Life', 'Tools', 'Favorites', 'Decoration'];
@@ -53,7 +53,9 @@ describe('powder coverage ledger', () => {
 
   it('the element table matches the extractor output sanity checks', () => {
     expect(ELEMENTS[0].key).toBe('NONE');
-    expect(ELEMENTS.length).toBe(195);
+    expect(ELEMENT_COUNT).toBe(195);
+    expect(ELEMENTS.length).toBe(512);
+    expect(ELEMENTS[300].Enabled).toBe(0);
     expect(ELEMENTS.find(e => e.key === 'WATR')!.default.temp).toBeCloseTo(293.15, 2);
     expect(ELEMENTS.find(e => e.key === 'LAVA')!.LowTemperatureTransition).toBe(512); // ST: special transition
   });

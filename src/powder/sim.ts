@@ -15,6 +15,7 @@ import {
 } from './elements';
 import { BEHAVIORS } from './behaviors';
 import { filtInteract } from './optics';
+import { floodInst } from './behaviors/electronics';
 
 export class Rng {
   private s: number;
@@ -165,7 +166,9 @@ export class PowderSim {
     const k = y * this.XRES + x;
     if (t === PT.SPRK && p !== -3) {
       const type = TYP(this.pmap[k]), index = ID(this.pmap[k]);
+      if (type === PT.WIRE) { this.ctype[index] = PT.DUST; return index; }
       if (!(type === PT.INST || (E[type].Properties & PROP_CONDUCTS)) || this.life[index] !== 0) return -1;
+      if (p === -2 && type === PT.INST) { floodInst(this, x, y); return index; }
       this.type[index] = PT.SPRK; this.life[index] = 4; this.ctype[index] = type;
       this.pmap[k] = (this.pmap[k] & ~0x1ff) | PT.SPRK;
       if (this.temp[index] + 10 < 673 && !this.legacyEnable && [PT.METL, PT.BMTL, PT.BRMT, PT.PSCN, PT.NSCN, PT.ETRD, PT.NBLE, PT.IRON].includes(type)) this.temp[index] += 10;
@@ -584,6 +587,7 @@ export class PowderSim {
           p.clearXf = fxf - dx; p.clearYf = fyf - dy; p.clearX = (p.clearXf + 0.5) | 0; p.clearY = (p.clearYf + 0.5) | 0;
           break;
         }
+        if (inb && wall === WL.DETECT && this.emap[this.cell(fx, fy)] < 8) this.setEmap((fx / CELL) | 0, (fy / CELL) | 0);
       }
       p.finX = fx; p.finY = fy; p.finXf = fxf; p.finYf = fyf;
     }
