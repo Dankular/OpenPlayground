@@ -1,11 +1,11 @@
 import type { RigCollider, RigPart, RigSprite } from './assets';
 
 export interface SourceComponent { type: string; pathId: string; className?: string; file?:string; data: Record<string, unknown>; status?: string; properties?: {pathId:string;data:Record<string,unknown>} }
-export interface SourceNode { id: string; name: string; parentId: string | null; position: { x: number; y: number }; angle: number; scale: { x: number; y: number }; active: boolean; components: SourceComponent[] }
+export interface SourceNode { id: string; name: string; parentId: string | null; position: { x: number; y: number }; angle: number; scale: { x: number; y: number }; active: boolean; bodyId?:string|null; components: SourceComponent[] }
 export interface PrefabPart extends Omit<RigPart,'colliders'> {
   nodeId?: string; bodyType?: number | 'dynamic' | 'kinematic' | 'static'; fixedRotation?: boolean; bullet?: boolean;
   simulated?: boolean; constraints?:number; material?: {friction?:number;restitution?:number}; metadata?:{components:SourceComponent[]};
-  colliders: (Omit<RigCollider,'type'> & { type: string; enabled?:boolean; density?:number; direction?: number; edgeRadius?: number; material?: { friction?: number; bounciness?: number; restitution?: number } | null; angle?: number })[];
+  colliders: (Omit<RigCollider,'type'> & { type: string; nodeId?:string; enabled?:boolean; density?:number; direction?: number; edgeRadius?: number; material?: { friction?: number; bounciness?: number; restitution?: number } | null; angle?: number })[];
   components?: SourceComponent[];
 }
 export interface PrefabJoint {

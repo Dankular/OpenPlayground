@@ -1,0 +1,8 @@
+.git
+.checkpoint-git
+.venv
+node_modules
+dist
+public/local-assets
+research
+*.log

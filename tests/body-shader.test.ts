@@ -1,7 +1,7 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {existsSync,readFileSync} from 'node:fs';
 import * as THREE from 'three';
-import {adaptBodyFragment,BodyShaderLibrary,updateBodyMaterial} from '../src/shaders/body';
+import {adaptBodyFragment,BodyShaderLibrary,bodyColorChannelToLinear,updateBodyMaterial} from '../src/shaders/body';
 
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
 describe('native body shader loading boundary',()=>{
@@ -29,9 +29,14 @@ describe.skipIf(!existsSync('public/local-assets/body-materials.json'))('actual 
       const material=native.create({materialKey:`sharedassets0.assets:${key}`,sprite,nativeScale:prefab.parts[0].scale})!;
       expect(material).toBeInstanceOf(THREE.RawShaderMaterial);expect(material.glslVersion).toBe(THREE.GLSL3);expect(material.userData.nativeBodyShader).toBe(true);
       expect(material.uniforms._SpriteUvRect.value.toArray()).toEqual([sprite.uvRect.x,sprite.uvRect.y,sprite.uvRect.width,sprite.uvRect.height]);
+      expect(material.uniforms._NativeScale.value.toArray()).toEqual([prefab.parts[0].scale.x,prefab.parts[0].scale.y]);
       expect(material.uniforms._MainTex.value).not.toBe(material.uniforms._FleshTex.value);
+      expect(native.projectColorSpace).toBe(1);expect(material.uniforms._MainTex.value.colorSpace).toBe(THREE.SRGBColorSpace);expect(material.uniforms._DamageTex.value.colorSpace).toBe(THREE.NoColorSpace);
+      expect(material.uniforms._MainTex.value.wrapS).toBe(THREE.ClampToEdgeWrapping);if(id==='20217')expect(material.uniforms._DamageTex.value.wrapS).toBe(THREE.RepeatWrapping);
+      const source=native.materials.get(`sharedassets0.assets:${key}`)!;expect(material.uniforms._BloodColor.value.x).toBeCloseTo(bodyColorChannelToLinear(source.colors._BloodColor.r),10);
       expect(material.uniforms._DamagePoints.value).toHaveLength(128);
       const color=material.uniforms._BloodColor.value as THREE.Vector4;if(id==='20203')expect(color.y).toBeGreaterThan(color.x);if(id==='20217')expect(color.x).toBeGreaterThan(color.y);
+      for(const uniform of Object.values(material.uniforms)){const value=uniform.value;if(typeof value==='number')expect(Number.isFinite(value)).toBe(true);else if(value instanceof THREE.Vector4||value instanceof THREE.Vector2)expect(value.toArray().every(Number.isFinite)).toBe(true);}
       material.dispose();
     }
   });

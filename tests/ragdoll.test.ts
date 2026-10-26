@@ -159,4 +159,14 @@ describe.skipIf(!existsSync('public/local-assets/prefabs/20100.json')||!existsSy
     const gorseHead=gorse.person.head!;gorse.system.slice(gorseLeg.part);gorse.system.update(.02);
     expect(gorseLeg.dismembered).toBe(true);expect(gorseLeg.connected).toBe(false);expect(gorseLeg.health).toBe(0);expect(gorseHead.health).toBe(200);expect(gorse.person.dead).toBe(false);
   });
+  it('stores bullet wound coordinates in native sprite space for all three species',async()=>{
+    for(const id of ['20217','20100','20203']){
+      const {system,person}=await original(id),limb=person.head!,native={x:.05,y:.03};
+      const world=limb.part.body.getWorldPoint(Vec2(native.x*limb.localScale.x,native.y*limb.localScale.y));
+      system.shot(limb.part,{damage:100,point:world,normal:{x:1,y:0}});
+      const wound=system.skinFor(limb.part)!.wounds.find(w=>w.type===1)!;
+      expect(wound).toBeDefined();expect(wound.x).toBeCloseTo(native.x,8);expect(wound.y).toBeCloseTo(native.y,8);
+      expect([wound.x,wound.y,wound.intensity,wound.time].every(Number.isFinite)).toBe(true);
+    }
+  });
 });

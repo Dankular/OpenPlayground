@@ -46,4 +46,13 @@ describe.skipIf(!existsSync('public/local-assets/prefabs.json'))('complete extra
     scene.buildId='wrong-build';expect(()=>sim.import(scene)).toThrow('game build');expect(sim.entities).toHaveLength(1);
     scene.buildId=assets.buildId;scene.entities[0].parts[0].id='incorrect';expect(()=>sim.import(scene)).toThrow('body identifiers');expect(sim.entities).toHaveLength(1);
   });
+  it('keeps runtime renderer and node activation separate from the source template and other instances',()=>{
+    const assets=load(),prefab=assets.prefabs.get(assets.catalog.items.find(i=>i.name==='Human')!.id)!;
+    const sim=new Simulation(null,assets),first=sim.spawnPrefab(prefab.catalogId,0,0);
+    const originalEnabled=prefab.renderers[0].enabled,originalActive=prefab.nodes[0].active;
+    first.renderers![0].enabled=!originalEnabled;first.metadata!.nodes[0].active=!originalActive;
+    const second=sim.spawnPrefab(prefab.catalogId,2,0);
+    expect(second.renderers![0].enabled).toBe(originalEnabled);expect(second.metadata!.nodes[0].active).toBe(originalActive);
+    expect(prefab.renderers[0].enabled).toBe(originalEnabled);expect(prefab.nodes[0].active).toBe(originalActive);
+  });
 });

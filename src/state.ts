@@ -12,7 +12,9 @@ export function registerSystemState(sim:Simulation,physical:PhysicalSystem,devic
     const entries=Object.entries(value);const byId=new Map(e.parts.map((p,i)=>[p.id??String(i),p]));
     const fields=['temperature','charge','burnProgress','burnIntensity','wetness'] as const;
     if(entries.some(([id,state])=>!byId.has(id)||!physical.get(byId.get(id)!)||!record(state)||typeof state.onFire!=='boolean'||fields.some(key=>!finite(state[key]))))return false;
-    if(entries.some(([,s])=>{const state=s as unknown as PhysicalState;return state.temperature< -273.15||state.charge<0||state.burnProgress<0||state.burnIntensity<0||state.burnIntensity>1||state.wetness<0||state.wetness>1;}))return false;
+    // ManagedUpdate clamps wetness, but WaterBehaviour can add .1 in each fixed
+    // step before that frame update. Preserve legitimate paused overshoots.
+    if(entries.some(([,s])=>{const state=s as unknown as PhysicalState;return state.temperature< -273.15||state.charge<0||state.burnProgress<0||state.burnIntensity<0||state.burnIntensity>1||state.wetness<0||state.wetness>1e6;}))return false;
     for(const [id,state] of entries)physical.get(byId.get(id)!)!.state={...(state as unknown as PhysicalState)};return true;
   }});
   sim.stateAdapters.set('devices',{capture:e=>devices.get(e).map(d=>({id:d.component.pathId,active:d.active,warmup:d.warmup,speed:d.speed,targetTemperature:d.targetTemperature})),restore:(e,value)=>{

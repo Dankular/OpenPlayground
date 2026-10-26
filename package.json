@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "build:standalone": "tsc --noEmit && vite build --mode standalone",
     "preview": "vite preview --host 127.0.0.1",
+    "start": "node server.mjs",
     "test": "vitest run"
   },
   "dependencies": {

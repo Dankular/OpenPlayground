@@ -24,6 +24,7 @@ export class Simulation {
   onSpawn: ((entity:Entity)=>void)[]=[];
   onRemove: ((entity:Entity)=>void)[]=[];
   stateAdapters = new Map<string,{capture:(entity:Entity)=>unknown;restore:(entity:Entity,value:unknown)=>boolean|void}>();
+  importTransactions = new Map<string,{capture:()=>unknown;rollback:(value:unknown)=>void}>();
   private suppressHooks=false;
   private breakableJoints=new Map<Joint,{entity:Entity;force:number;torque:number}>();
   private accumulator = 0;
@@ -93,7 +94,7 @@ export class Simulation {
     if(this.entities.length>=CONFIG.maxEntities)throw new Error(`Scene limit: ${CONFIG.maxEntities} objects`);
     const prefab=prefabOverride??this.assets?.prefabs.get(catalogId);if(!prefab)throw new Error('This object has no extracted prefab');
     if(!Array.isArray(prefab.parts)||!Array.isArray(prefab.joints)||!Array.isArray(prefab.renderers))throw new Error('Prefab has no normalized simulation data');
-    const e:Entity={id:this.nextId++,kind:'prefab',catalogId,prefabId:prefab.id??prefab.rootGameObjectId,name:prefab.name,parts:[],joints:[],jointById:new Map(),frozen:false,renderers:prefab.renderers,position:{x,y},angle:0,metadata:{nodes:prefab.nodes},unsupported:[...(prefab.unsupported??[])],isEnvironment:asEnvironment};
+    const e:Entity={id:this.nextId++,kind:'prefab',catalogId,prefabId:prefab.id??prefab.rootGameObjectId,name:prefab.name,parts:[],joints:[],jointById:new Map(),frozen:false,renderers:prefab.renderers.map(r=>({...r})),position:{x,y},angle:0,metadata:{nodes:prefab.nodes.map(node=>({...node}))},unsupported:[...(prefab.unsupported??[])],isEnvironment:asEnvironment};
     const noSelfCollision=prefab.nodes.some(n=>n.components.some(c=>c.className==='PersonBehaviour'||c.className==='LimbBehaviour'));
     const bodies=new Map<string,Body>();
     try {
@@ -109,7 +110,7 @@ export class Simulation {
           if(c.enabled===false)continue;
           const shapes=colliderShapes(c);
           if(!shapes.length){e.unsupported!.push(`Collider ${c.type} on ${p.name} has no supported geometry`);continue;}
-          for(const shape of shapes)body.createFixture(shape,{density:c.density??1,friction:c.material?.friction??p.material?.friction??.4,restitution:c.material?.bounciness??c.material?.restitution??p.material?.restitution??0,isSensor:c.isTrigger??false,filterGroupIndex:noSelfCollision?-e.id:0});
+          for(const shape of shapes)body.createFixture(shape,{density:c.density??1,friction:c.material?.friction??p.material?.friction??.4,restitution:c.material?.bounciness??c.material?.restitution??p.material?.restitution??0,isSensor:c.isTrigger??false,filterGroupIndex:noSelfCollision?-e.id:0}).setUserData({sourceNodeId:c.nodeId??p.nodeId});
         }
         if(type==='dynamic'&&p.mass>0){const md={mass:0,center:Vec2(),I:0};body.getMassData(md);const factor=p.mass/(md.mass||1);body.setMassData({mass:p.mass,center:md.center,I:md.I*factor});}
       }
@@ -236,7 +237,10 @@ export class Simulation {
       if(e.rig==='local'&&!this.humanRig)throw new Error('This scene needs local game assets. Run the extraction script first.');
       for (const p of e.parts) if (!p || (['x','y','angle','vx','vy','av'] as const).some(k => typeof p[k] !== 'number' || !Number.isFinite(p[k]) || Math.abs(p[k]) > 1e7)) throw new Error('Invalid scene coordinates');
     }
-    const original=[...this.entities],originalEnvironment=this.environment,staged:Entity[]=[];let stagedEnvironment:Entity|undefined;this.suppressHooks=true;
+    const original=[...this.entities],originalEnvironment=this.environment,staged:Entity[]=[];let stagedEnvironment:Entity|undefined;
+    const previousGlobals=[...this.importTransactions.values()].map(adapter=>({adapter,value:adapter.capture()}));
+    const previousStates=[...(originalEnvironment?[originalEnvironment]:[]),...original].flatMap(entity=>[...this.stateAdapters.values()].map(adapter=>({entity,adapter,value:adapter.capture(entity)})).filter(state=>state.value!==undefined));
+    const previousGravity=this.world.getGravity().clone();this.suppressHooks=true;
     try{
       // Stage the complete scene first; a failed adapter leaves the current scene intact.
       this.entities=[];
@@ -248,7 +252,7 @@ export class Simulation {
         for(const [name,state] of Object.entries(saved.systems??{}))if(this.stateAdapters.get(name)!.restore(e,state)===false)throw new Error(`Invalid ${name} simulation state`);
         if(saved.activeJointIds&&e.jointById)for(const [id,joint] of e.jointById)if(!saved.activeJointIds.includes(id)){this.world.destroyJoint(joint);this.breakableJoints.delete(joint);e.joints=e.joints.filter(j=>j!==joint);e.jointById.delete(id);}
       }
-    }catch(error){for(const e of staged){this.onRemove.forEach(fn=>fn(e));for(const p of e.parts)this.world.destroyBody(p.body);for(const j of e.joints)this.breakableJoints.delete(j);}this.entities=original;throw error;}
+    }catch(error){for(const e of staged){this.onRemove.forEach(fn=>fn(e));for(const p of e.parts)this.world.destroyBody(p.body);for(const j of e.joints)this.breakableJoints.delete(j);}this.entities=original;this.world.setGravity(previousGravity);for(const state of previousGlobals.reverse())state.adapter.rollback(state.value);for(const state of previousStates.reverse())state.adapter.restore(state.entity,state.value);throw error;}
     finally{this.suppressHooks=false;}
     this.entities=[...original,...staged];for(const e of original)this.remove(e);if(originalEnvironment)this.remove(originalEnvironment);
     this.environment=stagedEnvironment??null;this.entities=staged.filter(e=>e!==stagedEnvironment);this.ground.getFixtureList()?.setSensor(!!this.environment);this.accumulator=0;

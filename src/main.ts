@@ -12,6 +12,8 @@ import { WeaponSystem } from './systems/weapons';
 import { registerSystemState } from './state';
 import { GameAudio,loadAudioIndex } from './systems/audio';
 import { loadMapLibrary,mapSettings } from './maps';
+import { BodyShaderLibrary } from './shaders/body';
+import { EnvironmentSystem } from './systems/environment';
 
 const icons: Record<string, string> = {
  human: '<circle cx="24" cy="9" r="5"/><path d="M19 17h10l2 15h-6v14h-4V32h-6z"/><path d="m17 19-5 15m19-15 5 15"/>',
@@ -28,7 +30,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <dialog id="help-dialog"><button id="close-help" aria-label="Close shortcuts">×</button><span class="eyebrow">A LITTLE GUIDANCE</span><h2>Your experiment. Your rules.</h2><p>Choose an object, then click the chamber to place it. Choose the hand tool to grab and throw objects.</p><dl><dt>1–4</dt><dd>Select an object</dd><dt>Escape / V</dt><dd>Hand tool</dd><dt>Space</dt><dd>Pause / resume</dd><dt>.</dt><dd>Step one frame</dd><dt>F</dt><dd>Freeze / unfreeze selection</dd><dt>Q / E</dt><dd>Rotate selection</dd><dt>Delete</dt><dd>Delete selected object</dd><dt>Right / middle drag</dt><dd>Pan camera</dd><dt>Home</dt><dd>Reset camera</dd></dl><p class="help-footnote">Scenes are saved as OpenPlayground JSON.</p></dialog>`;
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
-const [rig,library,audioIndex] = await Promise.all([loadHumanRig(),loadAssetLibrary(),loadAudioIndex()]);
+const [rig,library,audioIndex,bodyShaders] = await Promise.all([loadHumanRig(),loadAssetLibrary(),loadAudioIndex(),BodyShaderLibrary.load()]);
 const audio=new GameAudio(audioIndex);let audioUnlocked=false;
 const unlockAudio=()=>{audioUnlocked=true;audio.unlock();};
 document.addEventListener('pointerdown',unlockAudio,{capture:true});document.addEventListener('keydown',unlockAudio,{capture:true});
@@ -39,15 +41,19 @@ sim.onSpawn.push(e=>physical.attach(e));sim.onRemove.push(e=>physical.remove(e))
 const devices=new DeviceSystem(physical,{setRendererEnabled:(entity,id,enabled)=>view.setRendererEnabled(entity,id,enabled)});
 sim.onSpawn.push(e=>devices.attach(e));sim.onRemove.push(e=>devices.remove(e));sim.beforeStep.push(dt=>devices.beforeStep(dt));
 const ragdolls=new RagdollSystem({getPhysical:part=>physical.get(part as Part)});
-sim.onSpawn.push(e=>ragdolls.attach(e));sim.onRemove.push(e=>ragdolls.remove(e));sim.beforeStep.push(dt=>ragdolls.update(dt));sim.afterStep.push(dt=>ragdolls.afterStep(dt));
+const environment=new EnvironmentSystem(sim.world,{getPhysical:part=>physical.get(part),ragdolls,onSettings:settings=>{physical.ambientTemperature=settings.ambientTemperature;}});
+sim.onSpawn.push(e=>environment.attach(e),e=>ragdolls.attach(e));sim.onRemove.push(e=>environment.remove(e),e=>ragdolls.remove(e));sim.beforeStep.push(dt=>environment.beforeStep(dt),dt=>ragdolls.update(dt));sim.afterStep.push(dt=>ragdolls.afterStep(dt));
 const weapons=new WeaponSystem(sim,physical,{onHit:hit=>ragdolls.shot(hit.part,{damage:hit.damage,point:hit.point,normal:hit.normal,exit:hit.exit}),onFragment:(part,force)=>ragdolls.damage(part,force*1.5,'fragment'),onSlice:part=>ragdolls.slice(part),onTrace:trace=>view.addTracer(trace),onExplosion:(position,range)=>view.addExplosion(position,range),onShot:(e,c,first)=>{if(audioUnlocked)audio.firearm(e,c,first);}});
 sim.onSpawn.push(e=>weapons.attach(e));sim.onRemove.push(e=>weapons.remove(e));sim.beforeStep.push(dt=>weapons.beforeStep(dt));
 registerSystemState(sim,physical,devices,ragdolls);sim.stateAdapters.set('weapons',{capture:e=>weapons.snapshot(e),restore:(e,value)=>weapons.restore(e,value)});
+sim.stateAdapters.set('environment',{capture:e=>environment.snapshot(e),restore:(e,value)=>environment.restore(e,value)});
+sim.importTransactions.set('environment',{capture:()=>({...environment.settings}),rollback:value=>environment.applySettings(value as typeof environment.settings)});
 const enteringContacts=new Set<import('planck').Contact>();
 sim.world.on('begin-contact',contact=>enteringContacts.add(contact));sim.world.on('end-contact',contact=>enteringContacts.delete(contact));
 sim.world.on('post-solve',(contact,impulse)=>{if(!enteringContacts.delete(contact))return;const amount=impulse.normalImpulses[0]??0;for(const body of [contact.getFixtureA().getBody(),contact.getFixtureB().getBody()]){const entity=body.getUserData() as Entity|undefined;const part=entity?.parts?.find(p=>p.body===body);if(part){ragdolls.impact(part,amount);if(audioUnlocked)audio.impact(part,amount);}}});
-const view = new SandboxRenderer($('#viewport'),sim);
+const view = new SandboxRenderer($('#viewport'),sim,bodyShaders);
 view.physicalState=part=>physical.get(part)?.state;
+view.skinFor=part=>ragdolls.skinFor(part);view.skinTime=()=>ragdolls.time;
 const maps=await loadMapLibrary(library);
 let currentMapId:string|null=null;
 function resetCameraForMap(){
@@ -57,7 +63,7 @@ function resetCameraForMap(){
 }
 function applyMapSettings(){
   const prefab=sim.environment?.catalogId?library?.prefabs.get(sim.environment.catalogId):undefined;
-  if(prefab){const settings=mapSettings(prefab);physical.ambientTemperature=settings.ambientTemperature;sim.world.setGravity({x:0,y:settings.gravity});currentMapId=prefab.catalogId;}else{currentMapId=null;physical.ambientTemperature=18;sim.world.setGravity({x:0,y:CONFIG.gravity});}
+  if(prefab){currentMapId=prefab.catalogId;}else{currentMapId=null;environment.applySettings({ambientTemperature:18,gravity:CONFIG.gravity});}
   const select=document.querySelector<HTMLSelectElement>('#map-select');if(select)select.value=currentMapId??'';
 }
 if(maps){
@@ -129,7 +135,7 @@ $('#scene-file').onchange=async()=>{
   const input=$<HTMLInputElement>('#scene-file'),file=input.files?.[0];if(!file)return;
   const generation=++sceneGeneration;
   try{
-    if(file.size>CONFIG.maxImportBytes)throw new Error('Scene file is too large');const data=JSON.parse(await file.text());
+    if(file.size>CONFIG.maxImportBytes)throw new Error('Scene file is too large');const data=JSON.parse(await file.text());if(!data||data.format!=='open-playground'||!Array.isArray(data.entities))throw new Error('Unsupported scene file');
     if(data.environment?.catalogId){if(!maps)throw new Error('This scene requires local environment assets');await maps.load(data.environment.catalogId);}
     if(library?.loadPrefab&&Array.isArray(data?.entities)){
       const ids=[...new Set(data.entities.filter((e:unknown)=>e&&typeof e==='object'&&(e as {kind?:unknown}).kind==='prefab').map((e:{catalogId?:unknown})=>e.catalogId).filter((id:unknown)=>typeof id==='string'))] as string[];
@@ -185,7 +191,7 @@ function animate(now:number){
   audio.camera={x:view.center.x,y:view.center.y,width:view.viewHeight*$('#viewport').clientWidth/Math.max(1,$('#viewport').clientHeight)};
   audio.setTimeScale(sim.paused?0:sim.speed);
   const scaled=sim.paused?0:Math.min(dt,.1)*sim.speed;
-  if(!sim.paused){physical.frame(scaled,sim.speed);devices.frame(scaled);}
+  if(!sim.paused){physical.frame(scaled,sim.speed);devices.frame(scaled);environment.frame(scaled);}
   sim.update(dt);view.updateEffects(scaled);
   if(selected&&!sim.entities.includes(selected))select(null);
   view.render(selected);

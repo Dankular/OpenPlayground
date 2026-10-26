@@ -335,7 +335,10 @@ class AllExtractor(Extractor):
                     stem = f"{safe_name(texture.assets_file.name)}-{texture.path_id}-{safe_name(td['m_Name'])}"
                     ref = {"file": texture.assets_file.name, "pathId": str(texture.path_id), "type": texture.type.name,
                            "url": f"/local-assets/objects/Texture2D/{stem}.png" if texture.type.name == "Texture2D" else None,
-                           "width": td.get("m_Width"), "height": td.get("m_Height"), "format": td.get("m_TextureFormat", td.get("m_ColorFormat"))}
+                           "width": td.get("m_Width"), "height": td.get("m_Height"), "format": td.get("m_TextureFormat", td.get("m_ColorFormat")),
+                           "colorSpace": td.get("m_ColorSpace"), "mipCount": td.get("m_MipCount"),
+                           "filterMode": td.get("m_TextureSettings", {}).get("m_FilterMode"),
+                           "wrapU": td.get("m_TextureSettings", {}).get("m_WrapU"), "wrapV": td.get("m_TextureSettings", {}).get("m_WrapV")}
                 textures[name] = {"texture": ref, **(ref or {}), "scale": value["m_Scale"], "offset": value["m_Offset"]}
             shader_obj = self.resolve(data["m_Shader"], obj.assets_file)
             shader = None
@@ -344,9 +347,11 @@ class AllExtractor(Extractor):
                 shader = {"file": shader_obj.assets_file.name, "pathId": str(shader_obj.path_id), "url": f"/local-assets/objects/Shader/{shader_stem}.shader"}
             materials[f"{filename}:{path_id}"] = {"file": filename, "pathId": str(path_id), "name": data["m_Name"], "shader": shader,
                                                    "textures": textures, "floats": dict(props["m_Floats"]), "colors": dict(props["m_Colors"]), "data": data}
-        result = {"schemaVersion": 1, "byId": materials}
+        player = next((o for o in self.env.objects if o.type.name == "PlayerSettings"), None)
+        color_space = self.decode(player).get("m_ActiveColorSpace") if player else None
+        result = {"schemaVersion": 1, "projectColorSpace": color_space, "byId": materials}
         save(self.output / "materials.json", json_ready(result))
-        save(self.output / "body-materials.json", json_ready({"schemaVersion": 1, "byId": {k: v for k, v in materials.items() if v["shader"] and v["shader"]["file"] == "sharedassets0.assets" and v["shader"]["pathId"] == "892"}}))
+        save(self.output / "body-materials.json", json_ready({"schemaVersion": 1, "projectColorSpace": color_space, "byId": {k: v for k, v in materials.items() if v["shader"] and v["shader"]["file"] == "sharedassets0.assets" and v["shader"]["pathId"] == "892"}}))
         return result
 
     def inventory(self, resume=False):
