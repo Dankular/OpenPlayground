@@ -1,0 +1,26 @@
+{
+  "name": "open-playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "build:standalone": "tsc --noEmit && vite build --mode standalone",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "earcut": "^3.2.4",
+    "planck": "^1.4.2",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/earcut": "^3.0.0",
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.180.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^4.1.12"
+  }
+}

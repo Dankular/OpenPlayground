@@ -1,0 +1,96 @@
+{
+  "browser": {
+    "mode": "launch",
+    "executable_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "headless": true
+  },
+  "start_url": {
+    "url": "http://127.0.0.1:5173"
+  },
+  "actions": [
+    {
+      "action": "wait_for_timeout",
+      "step_id": "ready",
+      "duration_ms": 1000
+    },
+    {
+      "action": "click",
+      "step_id": "pause",
+      "locator": {
+        "kind": "css",
+        "selector": "#pause"
+      }
+    },
+    {
+      "action": "click",
+      "step_id": "clear",
+      "locator": {
+        "kind": "css",
+        "selector": "#clear"
+      }
+    },
+    {
+      "action": "click",
+      "step_id": "human-tool",
+      "locator": {
+        "kind": "css",
+        "selector": "[data-kind=human]"
+      }
+    },
+    {
+      "action": "click",
+      "step_id": "place-human",
+      "locator": {
+        "kind": "css",
+        "selector": "canvas"
+      }
+    },
+    {
+      "action": "click",
+      "step_id": "freeze-human",
+      "locator": {
+        "kind": "css",
+        "selector": "#freeze"
+      }
+    },
+    {
+      "action": "click",
+      "step_id": "rotate-human",
+      "locator": {
+        "kind": "css",
+        "selector": "#rotate"
+      }
+    },
+    {
+      "action": "click",
+      "step_id": "step-frame",
+      "locator": {
+        "kind": "css",
+        "selector": "#step"
+      }
+    },
+    {
+      "action": "wait_for_timeout",
+      "step_id": "settle",
+      "duration_ms": 300
+    }
+  ],
+  "capture": {
+    "after_each_step": [
+      "dom"
+    ],
+    "at_end": [
+      "screenshot"
+    ],
+    "events": [
+      "console",
+      "page-errors"
+    ]
+  },
+  "environment": {
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    }
+  }
+}
