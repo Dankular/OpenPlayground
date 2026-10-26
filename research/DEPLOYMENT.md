@@ -38,3 +38,24 @@ The remote app paused, cleared the chamber, searched for Human, spawned the orig
 14-body prefab and applied an injury. All actions completed without captured
 page or console errors. The post-upload credential-removal deployment finished
 successfully as `2loqb17sjgpcwq0b8mkzipb6`.
+
+## Medical and machinery repair deployment
+
+Source commit `770b2c0ca81461de7bab69e4146419dd703bc071` deployed successfully as
+`julnzkdcrdww3ac0pevjcitu` on 2026-10-26. Coolify reports `running:healthy`;
+the public HTTPS `/healthz` returns `status: ok, assets: true`. The persistent
+asset volume was reused; the recovered syringe shader/material are embedded
+in the application bundle and require no additional asset upload credential.
+
+The production build and all 139 tests pass. The combined simulation test drives
+an extracted Life syringe into an extracted Human head, lodges the needle,
+transfers serum and revives the injured head.
+
+Local browser capture:
+`ev_926205bf7120c3ffb1b0c3b4ed231fb5c4bc1fdd0d8d683d81ab09e6956ec9db`.
+Public HTTPS capture:
+`ev_87acd2fe9e4121a2785dd5b323ce78b86c26fb1d72f57dd53eba9ff54cdfb373`.
+The public scenario paused, cleared, searched for Life syringe, spawned it,
+disabled infinite supply and activated extraction. Every declared action completed
+with no captured console/page errors. This verifies the deployed controls and
+native-shader adaptation; it does not establish full native-game equivalence.
