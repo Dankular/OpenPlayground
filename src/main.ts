@@ -119,8 +119,8 @@ const view = new SandboxRenderer($('#viewport'),sim,bodyShaders);
 const particles=new ParticleSystemView(view.scene,{gravity:()=>sim.world.getGravity()});sim.onSpawn.push(e=>particles.attach(e));sim.onRemove.unshift(e=>particles.remove(e));
 // Powder-grid simulation (ported from The Powder Toy); disabled until the powder tool is first opened.
 powder.enabled=false;
-sim.beforeStep.push(dt=>{if(!powder.enabled)return;powder.setGravity(sim.world.getGravity().y);powder.setAmbientCelsius(physical.ambientTemperature);powder.couple(sim.world,dt,{physicalFor:body=>physical.getByBody(body)});powder.advance(dt);});
-sim.sceneAdapters.set('powder',{capture:()=>powder.sim.numParts>0||powder.sim.bmap.some(w=>w)?powder.serialize():null,restore:(_entities,value)=>{if(value===null){powder.clear();return true;}const previous=powder.serialize(Infinity);if(!powder.deserialize(value))return false;return ()=>{powder.deserialize(previous);};}});
+sim.beforeStep.push(dt=>{if(!powder.enabled)return;const gravity=sim.world.getGravity();powder.setGravity(gravity.x,gravity.y);powder.setAmbientCelsius(physical.ambientTemperature);powder.couple(sim.world,{physicalFor:body=>physical.getByBody(body)});powder.advance(dt);});
+sim.sceneAdapters.set('powder',{capture:()=>powder.sim.numParts>0||powder.sim.bmap.some(w=>w)?powder.serialize():null,restore:(_entities,value)=>{const previous=powder.serialize(),wasEnabled=powder.enabled,undo=()=>{powder.deserialize(previous);powder.enabled=wasEnabled;};if(value===null){powder.clear();return undo;}if(!powder.deserialize(value))return false;powderUI.adopt();return undo;}});
 function updateLiquidParticles(){
   for(const entity of sim.renderEntities)for(const state of liquidDevices.get(entity)){
     if(!['LiquidOutletBehaviour','LiquidContainerHoleBehaviour'].includes(state.kind))continue;
@@ -202,7 +202,7 @@ function updateConnectionTools(){
   if(interactionTool!=='interact')$('#placement-hint').textContent=interactionTool==='remove-wire'?'Click a connection to remove it.':'Connect two points · Esc cancels · V returns to interact';
 }
 function setInteractionTool(tool:'interact'|'connect'|'remove-wire'){
-  sim.endDrag();pointerMode=null;selectedKind=null;interactionTool=tool;select(null);cancelConnection();renderCatalog();$('#viewport').classList.remove('placing');updateConnectionTools();
+  powderUI.setActive(false);sim.endDrag();pointerMode=null;selectedKind=null;interactionTool=tool;select(null);cancelConnection();renderCatalog();$('#viewport').classList.remove('placing');updateConnectionTools();
 }
 function finishConnection(point:{x:number;y:number}){
   if(!firstAnchor)return;const start=firstAnchor,end=endpointAt(point);

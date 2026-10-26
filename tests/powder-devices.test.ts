@@ -54,7 +54,6 @@ describe('powder devices and optics', () => {
   });
 
   it('an accelerator speeds up particles beside it', () => {
-    const sim = arena();
     const withAcel = arena(), without = arena();
     withAcel.createPart(-1, 80, 60, PT.ACEL);
     const a = withAcel.createPart(-1, 81, 60, PT.DUST), b = without.createPart(-1, 81, 60, PT.DUST);

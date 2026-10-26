@@ -2,7 +2,7 @@
  * Ported from SPRK/NTCT/PTCT/BTRY/SWCH/ETRD/IRON/GOLD/BMTL/TUNG/WIFI/WIRE/TTAN.cpp and
  * Simulation::FloodINST, The Powder Toy (GPL-3.0). Unported SPRK receivers: EMP, PPIP, LCRY, PUMP/GPMP/HSWC/PBCN
  * receive-side life toggles are ported, their own update functions are not. */
-import { CELL, ELEMENTS, ID, MAX_TEMP, PROP_CONDUCTS, PT, PT_NUM, R_TEMP, TYP } from '../elements';
+import { CELL, ELEMENTS, ID, PROP_CONDUCTS, PT, PT_NUM, R_TEMP, TYP } from '../elements';
 import type { PowderSim } from '../sim';
 import { restrictTemp } from '../sim';
 import { fireUpdate } from './fire';
@@ -284,7 +284,7 @@ export const gold: Hook = (s, i, x, y) => {
   if (TYP(ph) === PT.NEUT && s.rng.chance(1, 7)) s.killPart(ID(ph));
 };
 
-export const ttan: Hook = (s, i, x, y, ss, nt) => {
+export const ttan: Hook = (s, i, x, y, _ss, nt) => {
   let n = 0;
   if (nt <= 2) n = 2;
   else if (s.tmp[i]) n = 2;
@@ -357,4 +357,3 @@ export const wire: Hook = (s, i, x, y) => {
   }
   if (count === 1 || count === 2) s.ctype[i] = 1;
 };
-void MAX_TEMP;

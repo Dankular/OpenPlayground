@@ -352,4 +352,3 @@ const shield = (stage: 1 | 2 | 3 | 4): Hook => (s, i, x, y) => {
   }
 };
 export const shld1 = shield(1), shld2 = shield(2), shld3 = shield(3), shld4 = shield(4);
-void MAX_PRESSURE;

@@ -1,5 +1,5 @@
 /* FIRE / PLSM / LAVA shared update (Element_FIRE_update). Ported from FIRE.cpp, The Powder Toy (GPL-3.0). */
-import { CELL, CFDS, ELEMENTS, ID, MAX_TEMP, MIN_TEMP, PT, TYP } from '../elements';
+import { CFDS, ELEMENTS, ID, PT, TYP } from '../elements';
 import type { PowderSim } from '../sim';
 import { restrictTemp } from '../sim';
 
@@ -99,4 +99,3 @@ export function fireUpdate(s: PowderSim, i: number, x: number, y: number, surrou
   }
   return false;
 }
-void CELL; void MAX_TEMP; void MIN_TEMP;

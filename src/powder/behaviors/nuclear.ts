@@ -31,7 +31,7 @@ function resistLiquefy(s: PowderSim, i: number, under: number, x: number, y: num
   s.killPart(i);
 }
 
-export const neut: Hook = (s, i, x, y, ss, nt) => {
+export const neut: Hook = (s, i, x, y, ss) => {
   const c = s.cell(x, y), pressureFactor = 3 + Math.trunc(s.pv[c]);
   for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
     const r = near(s, x, y, rx, ry), rid = ID(r), px = x + rx, py = y + ry;
@@ -140,7 +140,7 @@ export const deut: Hook = (s, i, x, y) => {
   }
 };
 
-export const phot: Hook = (s, i, x, y, ss, nt) => {
+export const phot: Hook = (s, i, x, y, ss) => {
   if (!(s.ctype[i] & 0x3fffffff)) { s.killPart(i); return true; }
   if (s.temp[i] > 506 && s.rng.chance(1, 10)) fireUpdate(s, i, x, y, ss);
   for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
@@ -196,6 +196,7 @@ export const elec: Hook = (s, i, x, y) => {
         if (s.tmp2[rid] & 1) break;
         // fall through
       case PT.NEUT:
+        // upstream quirk, kept: after killing the electron the scan continues (kill_part is idempotent) and may react again
         s.changeType(rid, px, py, PT.H2); s.life[rid] = 0; s.ctype[rid] = 0; s.killPart(i); break;
       case PT.DEUT:
         if (s.life[rid] < 6000) s.life[rid]++;
@@ -384,4 +385,3 @@ export const warp: Hook = (s, i, x, y) => {
     }
   }
 };
-void PT_NUM; void MAX_PRESSURE;

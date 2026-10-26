@@ -60,7 +60,7 @@ export class PowderUI {
     $<HTMLSelectElement>('#powder-view').onchange = e => { if (this.layer) this.layer.view = (e.target as HTMLSelectElement).value as PowderView; };
     $<HTMLInputElement>('#powder-run').onchange = e => { o.world.enabled = (e.target as HTMLInputElement).checked; };
     $<HTMLButtonElement>('#powder-zone').onclick = () => this.placeAtView();
-    $<HTMLButtonElement>('#powder-clear').onclick = () => { o.world.clear(); this.layer?.update(); o.toast('Powder grid cleared'); };
+    $<HTMLButtonElement>('#powder-clear').onclick = () => { o.world.clear(); this.layer?.update(true); o.toast('Powder grid cleared'); };
     this.button.onclick = () => this.setActive(!this.active);
     window.addEventListener('keydown', e => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || (document.querySelector('dialog[open]'))) return;
@@ -91,6 +91,12 @@ export class PowderUI {
       this.ensureLayer().mesh.visible = true;
       const hint = document.querySelector('#placement-hint'); if (hint) hint.textContent = 'Drag to paint · P or Esc leaves the powder tool';
     } else this.last = null;
+  }
+  /** Show a world that was filled from outside the tool (scene import): run it, keep its saved position, draw it. */
+  adopt(): void {
+    this.placed = true;
+    this.o.world.enabled = this.panel.querySelector<HTMLInputElement>('#powder-run')!.checked;
+    this.ensureLayer().update(true);
   }
   /** Keep the layer drawn while the grid holds particles even when the tool is closed. */
   frame(): void {

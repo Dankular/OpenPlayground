@@ -1,6 +1,6 @@
 /* Water family, gases, acids, plants and coal. Ported from the corresponding
  * src/simulation/elements/*.cpp files of The Powder Toy (GPL-3.0). */
-import { CELL, ELEMENTS, ID, MAX_PRESSURE, MAX_TEMP, PT, TYP, TYPE_PART, TYPE_SOLID } from '../elements';
+import { ELEMENTS, ID, MAX_TEMP, PT, TYP, TYPE_PART, TYPE_SOLID } from '../elements';
 import type { PowderSim } from '../sim';
 import { restrictTemp, type UpdateFn } from '../sim';
 
@@ -443,5 +443,4 @@ export const goo: Hook = (s, i, x, y) => {
   if (!s.life[i] && s.pv[c] > 1) s.life[i] = s.rng.between(300, 379);
   if (s.life[i]) { s.vx[i] += 0.1 * s.avx[c]; s.vy[i] += 0.1 * s.avy[c]; }
 };
-void CELL; void MAX_PRESSURE;
 export type { UpdateFn };

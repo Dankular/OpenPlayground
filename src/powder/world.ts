@@ -5,7 +5,7 @@
  * such in research/POWDER.md. Grid y grows downward; world y grows upward.
  */
 import { Vec2, type Body, type Fixture, type World } from 'planck';
-import { AIR, GRAV, PowderSim } from './sim';
+import { GRAV, PowderSim } from './sim';
 import { CELL, ELEMENTS, ID, PT, TYP, WL } from './elements';
 import { getHeatCapacity, ignite, type PhysicalObject } from '../systems/physical';
 
@@ -69,16 +69,23 @@ export class PowderWorld {
     return x >= this.origin.x && y >= this.origin.y && x < this.origin.x + this.width && y < this.origin.y + this.height;
   }
 
-  moveTo(x: number, y: number) { this.origin = { x, y }; this.staticSignature = NaN; }
+  moveTo(x: number, y: number) { this.origin = { x, y }; this.staticSignature = NaN; this.revision++; }
 
   setAmbientCelsius(celsius: number) { this.sim.ambientAirTemp = celsius + 273.15; }
-  setGravity(worldGravityY: number) { this.sim.gravityMode = Math.abs(worldGravityY) < 0.05 ? GRAV.OFF : GRAV.VERTICAL; }
+/** Follow the rigid-body world's gravity vector (screen y points down, world y up). */
+  setGravity(gx: number, gy: number): void {
+    const magnitude = Math.hypot(gx, gy), sim = this.sim;
+    if (magnitude < 0.05) { sim.gravityMode = GRAV.OFF; return; }
+    if (Math.abs(gx) < 1e-6 && Math.abs(gy + 9.81) < 1e-3) { sim.gravityMode = GRAV.VERTICAL; return; }
+    sim.gravityMode = GRAV.CUSTOM; sim.customGravityX = gx / 9.81; sim.customGravityY = -gy / 9.81;
+  }
 
   // ---- painting --------------------------------------------------------------------------------------------------------
   /** Brush: element id (PT.*), 'erase', or 'wall'. Radius is in pixels. Returns number of changed pixels. */
   paint(x: number, y: number, what: number | 'erase' | 'wall' | 'unwall', radius = 3): number {
     const c = this.worldToPixel(x, y), sim = this.sim;
     let n = 0;
+    this.revision++;
     for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
       if (dx * dx + dy * dy > radius * radius + radius) continue;
       const px = c.x + dx, py = c.y + dy;
@@ -87,7 +94,7 @@ export class PowderWorld {
       else if (what === 'wall' || what === 'unwall') {
         const cx = Math.floor(px / CELL), cy = Math.floor(py / CELL), w = what === 'wall' ? WL.WALL : WL.ERASE;
         if (sim.bmap[cy * sim.XCELLS + cx] !== w) { sim.bmap[cy * sim.XCELLS + cx] = w; n++; }
-      } else if (sim.createPart(-2, px, py, what) >= 0) n++;
+      } else if (sim.createPart(-2, px, py, what, what === PT.LIGH ? -1 : 0) >= 0) n++;
     }
     return n;
   }
@@ -98,7 +105,9 @@ export class PowderWorld {
     for (let i = 0; i <= steps; i++) n += this.paint(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, what, radius);
     return n;
   }
-  clear() { this.sim.clear(); this.solid.fill(0); this.dynamicPixels = []; this.staticSignature = NaN; this.accumulator = 0; }
+  /** Bumped whenever the grid changes outside `advance`, so presentation can skip redundant redraws. */
+  revision = 0;
+  clear() { this.revision++; this.sim.clear(); this.solid.fill(0); this.dynamicPixels = []; this.staticSignature = NaN; this.accumulator = 0; }
 
   /** Adds an explosion-like pressure pulse centred on a world point. amount is in Powder Toy pressure units. */
   injectPressure(x: number, y: number, radiusMetres: number, amount: number): void {
@@ -146,7 +155,7 @@ export class PowderWorld {
    * Called once per physics step before Planck integrates. Rebuilds the body masks, then exchanges heat, ignition, wetness
    * and pressure force between grid and bodies.
    */
-  couple(world: World, dt: number, coupling: PowderCoupling): void {
+  couple(world: World, coupling: PowderCoupling): void {
     if (!this.enabled) return;
     const rng = coupling.random ?? Math.random, sim = this.sim, XRES = sim.XRES;
     const lower = Vec2(this.origin.x, this.origin.y), upper = Vec2(this.origin.x + this.width, this.origin.y + this.height);
@@ -177,7 +186,6 @@ export class PowderWorld {
       bodyPixels.set(body, list);
       for (const k of list) this.dynamicPixels.push(k);
     }
-    const ambientK = sim.ambientAirTemp;
     for (const [body, pixels] of bodyPixels) {
       if (!pixels.length) continue;
       const object = coupling.physicalFor(body);
@@ -249,12 +257,11 @@ export class PowderWorld {
         sim.avy[c] += (-v.y * toPixelsPerFrame - sim.avy[c]) * 0.02;
       }
     }
-    void dt; void ambientK; void AIR;
   }
 
   // ---- persistence ------------------------------------------------------------------------------------------------------
   /** Compact JSON-able snapshot: particles as parallel numeric rows plus walls. Air fields are rebuilt by simulation. */
-  serialize(maxParticles = 30000) {
+  serialize(maxParticles = Infinity) {
     const sim = this.sim, rows: number[][] = [];
     for (let i = 0; i < sim.active && rows.length < maxParticles; i++) {
       if (!sim.type[i]) continue;

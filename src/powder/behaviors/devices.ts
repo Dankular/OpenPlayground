@@ -1,8 +1,7 @@
 /* Force fields, converters and simple powered devices. Ported from ACEL/DCEL/RPEL/DMG/CONV/MORT/PVOD/LCRY/HSWC/DLAY.cpp,
  * The Powder Toy (GPL-3.0). HSWC's FILT temperature deserialisation is not ported (FILT has no behaviour here). */
-import { CELL, ELEMENTS, ID, MAX_PRESSURE, MAX_VELOCITY, MIN_PRESSURE, PMAPBITS, PROP_CONDUCTS, PT, PT_NUM, TYP, TYPE_ENERGY, TYPE_GAS, TYPE_LIQUID, TYPE_PART, TYPE_SOLID } from '../elements';
+import { ELEMENTS, ID, MAX_PRESSURE, MAX_VELOCITY, MIN_PRESSURE, PMAPBITS, PROP_CONDUCTS, PT, PT_NUM, TYP, TYPE_ENERGY, TYPE_GAS, TYPE_LIQUID, TYPE_PART, TYPE_SOLID } from '../elements';
 import type { PowderSim } from '../sim';
-import { restrictTemp } from '../sim';
 
 const E = ELEMENTS;
 type Hook = (s: PowderSim, i: number, x: number, y: number, ss: number, nt: number) => boolean | void;
@@ -176,8 +175,6 @@ export const dlay: Hook = (s, i, x, y) => {
     } else if (TYP(r) === PT.NSCN && oldl === 1) s.createPart(-1, x + rx, y + ry, PT.SPRK);
   }
 };
-void CELL; void restrictTemp;
-
 /* ---- pumps and sensors (PUMP/GPMP/TSNS/PSNS/DTEC/FRAY.cpp) ---- */
 
 const SENSOR_SKIP = new Set<number>([PT.WATR, PT.SLTW, PT.NTCT, PT.PTCT, PT.INWR]);

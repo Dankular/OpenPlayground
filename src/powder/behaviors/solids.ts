@@ -1,6 +1,6 @@
 /* Glass, crystals, metals and reactive chemicals. Ported from YEST/BRMT/GLAS/CLST/QRTZ/BREC/SLCN/LITH/BASE/RFRG/HEAC/
  * PTNM/CRMC.cpp, The Powder Toy (GPL-3.0). */
-import { ELEMENTS, ID, MAX_TEMP, PROP_CONDUCTS, PT, TYP, TYPE_SOLID } from '../elements';
+import { ELEMENTS, ID, PROP_CONDUCTS, PT, TYP, TYPE_SOLID } from '../elements';
 import type { PowderSim } from '../sim';
 import { restrictTemp } from '../sim';
 
@@ -379,8 +379,6 @@ export const crmc: Hook = (s, i, x, y) => {
   if (s.pv[s.cell(x, y)] < -30) s.createPart(i, x, y, PT.CLST);
   s.temp[i] = orig;
 };
-void MAX_TEMP;
-
 /** RSST (resist liquid) and RSSS (resist solid): copy ctype/tmp from nearby cloners; RSST also reacts with GUNP/BCOL. */
 const resist = (self: number, liquid: boolean): Hook => (s, i, x, y) => {
   for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {

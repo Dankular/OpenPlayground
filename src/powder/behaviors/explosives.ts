@@ -1,5 +1,5 @@
 /* Explosives and flame-like helpers. Ported from BANG/BOMB/DEST/IGNT/FUSE/FSEP/EMBR/THDR.cpp, The Powder Toy (GPL-3.0). */
-import { CELL, ELEMENTS, ID, MAX_PRESSURE, MAX_TEMP, MIN_PRESSURE, PROP_CONDUCTS, PROP_SPARKSETTLE, PT, TYP, TYPE_LIQUID, TYPE_PART, TYPE_SOLID } from '../elements';
+import { ELEMENTS, ID, MAX_PRESSURE, MAX_TEMP, MIN_PRESSURE, PROP_CONDUCTS, PROP_SPARKSETTLE, PT, TYP, TYPE_LIQUID, TYPE_PART, TYPE_SOLID } from '../elements';
 import type { PowderSim } from '../sim';
 import { restrictTemp } from '../sim';
 
@@ -171,4 +171,3 @@ export const thdr: Hook = (s, i, x, y) => {
   }
   if (kill) { s.killPart(i); return true; }
 };
-void CELL;

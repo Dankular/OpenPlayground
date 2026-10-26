@@ -2,7 +2,7 @@
  * Colours come from the generated element table; fire, plasma, lava and the heat/pressure overlays follow the
  * gradients and formulas in The Powder Toy's Renderer.cpp / FIRE.cpp / PLSM.cpp / LAVA.cpp (GPL-3.0). */
 import * as THREE from 'three';
-import { ELEMENTS, ID, PROP_HOT_GLOW, PT, TYP } from './elements';
+import { ELEMENTS, PROP_HOT_GLOW, PT } from './elements';
 import type { PowderWorld } from './world';
 
 type Stop = [number, number];
@@ -77,8 +77,13 @@ export class PowderLayer {
     out[0] = r; out[1] = g; out[2] = b;
   }
 
-  update(): void {
-    const w = this.world, s = w.sim, XRES = s.XRES, YRES = s.YRES, d = this.data, c = [0, 0, 0];
+  private drawn = { frame: -1, revision: -1, view: '' as PowderView | '' };
+  /** Redraw the texture if the grid stepped or was edited since the last call (or `force`). */
+  update(force = false): void {
+    const w = this.world;
+    if (!force && this.drawn.frame === w.sim.frameCount && this.drawn.revision === w.revision && this.drawn.view === this.view) { this.place(); return; }
+    this.drawn = { frame: w.sim.frameCount, revision: w.revision, view: this.view };
+    const s = w.sim, XRES = s.XRES, YRES = s.YRES, d = this.data, c = [0, 0, 0];
     d.fill(0);
     if (this.view !== 'particles') {
       for (let y = 0; y < YRES; y++) for (let x = 0; x < XRES; x++) {
@@ -108,4 +113,3 @@ export class PowderLayer {
     this.mesh.geometry.dispose(); (this.mesh.material as THREE.Material).dispose(); this.texture.dispose();
   }
 }
-void ID; void TYP;

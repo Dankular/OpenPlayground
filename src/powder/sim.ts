@@ -160,7 +160,7 @@ export class PowderSim {
   }
 
   /** p = -1: new particle; -2: from a brush; -3: skip pmap checks; otherwise replace particle p. Returns index or -1. */
-  createPart(p: number, x: number, y: number, t: number, v = 0): number {
+  createPart(p: number, x: number, y: number, t: number, v = -1): number {
     const E = this.E;
     if (x < 0 || y < 0 || x >= this.XRES || y >= this.YRES || t <= 0 || t >= PT_NUM || !E[t]?.Enabled) return -1;
     const k = y * this.XRES + x;
@@ -673,18 +673,17 @@ export class PowderSim {
       }
     }
     // flatten
-    let newActive = 0, last = -1;
+    let newActive = 0;
     this.pfree = -1;
     let tail = -1;
     for (let i = 0; i < this.active; i++) {
       if (this.type[i]) {
         for (let j = newActive; j < i; j++) { if (tail === -1) this.pfree = j; else this.nextFree[tail] = j; tail = j; }
-        newActive = i + 1; last = i;
+        newActive = i + 1;
       }
     }
     if (tail !== -1) this.nextFree[tail] = -1;
     this.active = newActive;
-    void last;
     this.elementRecount = false;
   }
 
@@ -1100,7 +1099,7 @@ export class PowderSim {
     }
   }
 
-  /** Simulation::CreateLine (Bresenham-style, same quirks). c may be PMAP-encoded as (v << 9 | type). */
+  /** Simulation::CreateLine (Bresenham-style, same quirks). c is an element id; v is passed to its create hook. */
   createLine(x1: number, y1: number, x2: number, y2: number, c: number, v = 0): void {
     const rev = Math.abs(y2 - y1) > Math.abs(x2 - x1);
     if (rev) { [x1, y1] = [y1, x1]; [x2, y2] = [y2, x2]; }
@@ -1337,4 +1336,3 @@ export class PowderSim {
     hv.set(this.ohv);
   }
 }
-void PROP_CONDUCTS;

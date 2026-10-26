@@ -50,4 +50,3 @@ export const CREATES: Record<string, Behavior['create']> = {
     s.tmp2[i] = 4;
   },
 };
-void PT;

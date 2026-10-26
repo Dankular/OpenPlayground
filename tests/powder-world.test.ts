@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Box, Vec2, World } from 'planck';
+import * as THREE from 'three';
 import { PowderWorld } from '../src/powder/world';
+import { PowderLayer } from '../src/powder/layer';
 import { PT } from '../src/powder/elements';
 import { createPhysicalObject, type PhysicalObject } from '../src/systems/physical';
 
@@ -13,7 +15,7 @@ const make = () => {
 };
 const count = (pw: PowderWorld, t: number) => { let n = 0; for (let i = 0; i < pw.sim.active; i++) if (pw.sim.type[i] === t) n++; return n; };
 const frames = (pw: PowderWorld, world: World, n: number, phys: (b: any) => PhysicalObject | undefined = () => undefined) => {
-  for (let i = 0; i < n; i++) { pw.couple(world, 1 / 50, { physicalFor: phys, random: () => 0.01 }); world.step(1 / 50); pw.advance(1 / 60); }
+  for (let i = 0; i < n; i++) { pw.couple(world, { physicalFor: phys, random: () => 0.01 }); world.step(1 / 50); pw.advance(1 / 60); }
 };
 
 describe('powder world coupling', () => {
@@ -98,5 +100,41 @@ describe('powder world coupling', () => {
     expect(other.deserialize({ ...data, particles: [[9999, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] })).toBe(false);
     expect(other.deserialize({ ...data, cellsX: 7 })).toBe(false);
     expect(count(other, PT.WATR)).toBe(count(pw, PT.WATR)); // untouched after rejection
+  });
+
+  it('lightning painted with the brush gets default power and survives', () => {
+    const { pw } = make();
+    pw.paint(0, 1.5, PT.LIGH, 1);
+    pw.advance(1 / 60);
+    let life = 0;
+    for (let i = 0; i < pw.sim.active; i++) if (pw.sim.type[i] === PT.LIGH) life = Math.max(life, pw.sim.life[i]);
+    expect(life).toBeGreaterThan(10);
+  });
+
+  it('follows the rigid-body gravity vector, including inverted gravity', () => {
+    const down = make().pw, up = make().pw;
+    for (const [pw, g] of [[down, -9.81], [up, 9.81]] as const) { pw.setGravity(0, g); pw.paint(0, 2, PT.DUST, 1); }
+    const y0 = down.worldToPixel(0, 2).y;
+    for (let f = 0; f < 30; f++) { down.advance(1 / 60); up.advance(1 / 60); }
+    const mean = (pw: PowderWorld) => { let sum = 0, n = 0; for (let i = 0; i < pw.sim.active; i++) if (pw.sim.type[i]) { sum += pw.sim.y[i]; n++; } return sum / n; };
+    expect(mean(down)).toBeGreaterThan(y0);
+    expect(mean(up)).toBeLessThan(y0);
+  });
+
+  it('the layer redraws only when the grid changed', () => {
+    const { pw } = make();
+    const layer = new PowderLayer(pw, new THREE.Scene());
+    layer.update();
+    const v = layer.texture.version;
+    layer.update();
+    expect(layer.texture.version).toBe(v);
+    pw.paint(0, 1, PT.SAND, 2);
+    layer.update();
+    expect(layer.texture.version).toBeGreaterThan(v);
+    const v2 = layer.texture.version;
+    pw.advance(1 / 60);
+    layer.update();
+    expect(layer.texture.version).toBeGreaterThan(v2);
+    layer.dispose();
   });
 });
