@@ -380,3 +380,18 @@ export const crmc: Hook = (s, i, x, y) => {
   s.temp[i] = orig;
 };
 void MAX_TEMP;
+
+/** RSST (resist liquid) and RSSS (resist solid): copy ctype/tmp from nearby cloners; RSST also reacts with GUNP/BCOL. */
+const resist = (self: number, liquid: boolean): Hook => (s, i, x, y) => {
+  for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
+    const r = near(s, x, y, rx, ry);
+    if (!r) continue;
+    const rt = TYP(r), rid = ID(r);
+    if (liquid && rt === PT.GUNP) { s.createPart(i, x, y, PT.FIRW); s.killPart(rid); return true; }
+    if (liquid && rt === PT.BCOL) { s.createPart(i, x, y, PT.FSEP); s.life[i] = 50; s.killPart(rid); return true; }
+    if ((rt === PT.CLNE || rt === PT.PCLN) && s.ctype[rid] !== self) s.ctype[i] = s.ctype[rid];
+    if ((rt === PT.BCLN || rt === PT.PBCN) && s.ctype[rid] !== self) s.tmp[i] = s.ctype[rid];
+  }
+  if (!liquid) { const c = s.cell(x, y); s.blockAir[c] = 1; s.blockAirH[c] = 8; }
+};
+export const rsst = resist(PT.RSST, true), rsss = resist(PT.RSSS, false);

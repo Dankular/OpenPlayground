@@ -26,7 +26,7 @@ export interface ElementDef {
   Advection: number; AirDrag: number; AirLoss: number; Loss: number; Collision: number; Gravity: number;
   NewtonianGravity: number; Diffusion: number; HotAir: number; Falldown: number; Flammable: number;
   Explosive: number; Meltable: number; Hardness: number; PhotonReflectWavelengths: number; Weight: number;
-  HeatConduct: number; HeatCapacity: number; Properties: number;
+  HeatConduct: number; HeatCapacity: number; Properties: number; CarriesTypeIn: number;
   LowPressure: number; LowPressureTransition: number; HighPressure: number; HighPressureTransition: number;
   LowTemperature: number; LowTemperatureTransition: number; HighTemperature: number; HighTemperatureTransition: number;
   MenuVisible: number; MenuSection: number; MenuSort: number; Enabled: number;

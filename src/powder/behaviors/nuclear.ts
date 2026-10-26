@@ -21,6 +21,16 @@ function deutBurst(s: PowderSim, n: number, x: number, y: number, temp: number, 
   s.pv[s.cell(x, y)] += sign * 6 * CFDS * n;
 }
 
+/** NEUT on RSSS / PHOT on RSST: the resist material turns into its stored ctype (or the default state) and the particle is absorbed. */
+function resistLiquefy(s: PowderSim, i: number, under: number, x: number, y: number, fallback: number): void {
+  const ct = s.ctype[under], tmpUnder = s.tmp[under];
+  if (ct > 0 && ct < PT_NUM) {
+    s.createPart(under, x, y, ct);
+    if (tmpUnder > 0 && tmpUnder < PT_NUM && ELEMENTS[ct].CarriesTypeIn & 1 << 2 /* FIELD_CTYPE */) s.ctype[under] = tmpUnder;
+  } else s.changeType(under, x, y, fallback);
+  s.killPart(i);
+}
+
 export const neut: Hook = (s, i, x, y, ss, nt) => {
   const c = s.cell(x, y), pressureFactor = 3 + Math.trunc(s.pv[c]);
   for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
@@ -66,6 +76,9 @@ export const neut: Hook = (s, i, x, y, ss, nt) => {
       case PT.EXOT: if (s.rng.chance(1, 20)) s.life[rid] = 1500; break;
       case PT.RFRG: s.createPart(rid, px, py, s.rng.chance(1, 2) ? PT.GAS : PT.CAUS); break;
       case PT.BASE: if (s.temp[rid] > 50 + 273.15 && s.rng.chance(1, 35)) s.createPart(rid, px, py, PT.LRBD); break;
+      case PT.RSSS:
+        if (!rx && !ry) { resistLiquefy(s, i, rid, x, y, PT.RSST); return true; }
+        break;
     }
   }
 };
@@ -152,6 +165,8 @@ export const phot: Hook = (s, i, x, y, ss, nt) => {
       const a = s.rng.between(-50, 50) * 0.001, cr = Math.cos(a), sr = Math.sin(a);
       const vx = cr * s.vx[i] + sr * s.vy[i], vy = cr * s.vy[i] - sr * s.vx[i];
       s.vx[i] = vx; s.vy[i] = vy;
+    } else if (rt === PT.RSST && !ry && !rx) {
+      resistLiquefy(s, i, rid, x, y, PT.RSSS); return true;
     } else if (rt === PT.FILT && s.tmp[rid] === 9) {
       s.vx[i] += s.rng.between(-500, 500) / 1000; s.vy[i] += s.rng.between(-500, 500) / 1000;
     }
