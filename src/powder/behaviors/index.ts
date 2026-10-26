@@ -4,6 +4,9 @@ import * as ex from './explosives';
 import * as el from './electronics';
 import * as nu from './nuclear';
 import * as ma from './materials';
+import * as so from './solids';
+import * as xo from './exotic';
+import * as dv from './devices';
 import { fireUpdate } from './fire';
 import { CREATES } from './creates';
 
@@ -20,9 +23,17 @@ const UPDATES: Record<string, NonNullable<Behavior['update']>> = {
   BMTL: el.bmtl, TUNG: el.tung, WIFI: el.wifi, WIRE: el.wire,
   NEUT: nu.neut, PLUT: nu.plut, URAN: nu.uran, ISOZ: nu.isoz, ISZS: nu.isoz, DEUT: nu.deut, PHOT: nu.phot, ELEC: nu.elec,
   PROT: nu.prot, POLO: nu.polo, AMTR: nu.amtr, ANAR: nu.anar, SING: nu.sing, WARP: nu.warp,
+  YEST: so.yest, BRMT: so.brmt, GLAS: so.glas, CLST: so.clst, QRTZ: so.qrtz, PQRT: so.qrtz, BREC: so.brec, SLCN: so.slcn, LITH: so.lith,
+  BASE: so.base, RFRG: so.rfrg, RFGL: so.rfrg, HEAC: so.heac, PTNM: so.ptnm, CRMC: so.crmc,
+  VIRS: xo.virs, VRSS: xo.virs, VRSG: xo.virs, EXOT: xo.exot, VIBR: xo.vibr, BVBR: xo.vibr, GRAV: xo.grav, INVIS: xo.invis, LIGH: xo.ligh,
+  FIRW: xo.firw, FWRK: xo.fwrk, C5: xo.c5, SHLD1: xo.shld1, SHLD2: xo.shld2, SHLD3: xo.shld3, SHLD4: xo.shld4,
+  ACEL: dv.acel, DCEL: dv.dcel, RPEL: dv.rpel, DMG: dv.dmg, CONV: dv.conv, MORT: dv.mort, PVOD: dv.pvod, LCRY: dv.lcry, HSWC: dv.hswc, DLAY: dv.dlay,
+  PUMP: dv.pump, GPMP: dv.gpmp, TSNS: dv.tsns, PSNS: dv.psns, DTEC: dv.dtec, FRAY: dv.fray,
+  PCLN: dv.pcln, PBCN: dv.pbcn, STOR: dv.stor, ARAY: dv.aray,
   GLOW: ma.glow, MERC: ma.merc, GEL: ma.gel, SPNG: ma.spng, CLNE: ma.clne, BCLN: ma.bcln,
 };
 
 export const BEHAVIORS: Record<string, Behavior> = {};
 for (const [k, update] of Object.entries(UPDATES)) BEHAVIORS[k] = { update };
+CREATES.SLCN = (s, i) => so.initSparkles(s, i);
 for (const [k, create] of Object.entries(CREATES)) (BEHAVIORS[k] ??= {}).create = create;

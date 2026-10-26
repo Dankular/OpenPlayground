@@ -1,6 +1,7 @@
 /* Per-element Create hooks (randomised initial properties). Ported from the static create() functions in
  * src/simulation/elements/*.cpp, The Powder Toy (GPL-3.0). */
-import { PT } from '../elements';
+import { ID, PT, TYP } from '../elements';
+import { filtInteract } from '../optics';
 import type { Behavior } from '../sim';
 
 const rad = (deg: number) => deg * Math.PI / 180;
@@ -29,9 +30,11 @@ export const CREATES: Record<string, Behavior['create']> = {
     const r = s.rng.between(128, 255) / 127, a = rad(s.rng.between(0, 359));
     s.life[i] = s.rng.between(480, 959); s.vx[i] = r * Math.cos(a); s.vy[i] = r * Math.sin(a);
   },
-  PHOT: (s, i) => {
+  PHOT: (s, i, x, y) => {
     const a = s.rng.between(0, 7) * 0.7854;
     s.vx[i] = 3 * Math.cos(a); s.vy[i] = 3 * Math.sin(a);
+    const under = s.pmap[y * s.XRES + x];
+    if (TYP(under) === PT.FILT) s.ctype[i] = filtInteract(s, ID(under), s.ctype[i]);
   },
   LIGH: (s, i, x, y, _t, v) => {
     s.life[i] = v >= 0 ? Math.min(v, 55) : 30;

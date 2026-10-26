@@ -14,6 +14,7 @@ import {
   type ElementDef,
 } from './elements';
 import { BEHAVIORS } from './behaviors';
+import { filtInteract } from './optics';
 
 export class Rng {
   private s: number;
@@ -333,6 +334,27 @@ export class PowderSim {
             if (p >= -res && p <= res) { this.changeType(i, x, y, PT.NEUT); this.ctype[i] = 0; }
             break;
           }
+          case PT.FILT: this.ctype[i] = filtInteract(this, rid, this.ctype[i]); break;
+          case PT.C5:
+            if (this.life[rid] > 0 && (this.ctype[rid] & this.ctype[i] & 0xffffffc0)) {
+              const vx = ((this.tmp[rid] << 16) >> 16) / 255, vy = (this.tmp[rid] >> 16) / 255;
+              let vn = this.vx[i] * this.vx[i] + this.vy[i] * this.vy[i];
+              if (this.vx[i] + vx === 0 && this.vy[i] + vy === 0) { this.vx[i] = vy; this.vy[i] = -vx; }
+              else {
+                this.ctype[i] = (this.ctype[rid] & this.ctype[i]) >> 6;
+                this.vx[i] += vx; this.vy[i] += vy;
+                vn /= this.vx[i] * this.vx[i] + this.vy[i] * this.vy[i];
+                vn = Math.sqrt(vn);
+                this.vx[i] *= vn; this.vy[i] *= vn;
+              }
+              this.life[rid] = 0; this.ctype[rid] = 0;
+            } else if (!this.ctype[rid] && (this.ctype[i] & 0xffffffc0)) {
+              this.life[rid] = 1; this.ctype[rid] = this.ctype[i];
+              this.tmp[rid] = (0xffff & Math.trunc(this.vx[i] * 255)) | (0xffff0000 & Math.trunc(this.vy[i] * 16711680));
+              this.tmp2[rid] = (0xffff & Math.trunc((this.x[i] - x) * 255)) | (0xffff0000 & Math.trunc((this.y[i] - y) * 16711680));
+              this.killPart(i);
+            }
+            break;
           case PT.BIZR: case PT.BIZRG: case PT.BIZRS: this.changeType(i, x, y, PT.ELEC); this.ctype[i] = 0; break;
           case PT.H2:
             if (!(this.tmp[i] & 1)) { this.changeType(i, x, y, PT.PROT); this.ctype[i] = 0; this.tmp2[i] = 1; this.createPart(rid, x, y, PT.ELEC); return 1; }
@@ -346,6 +368,7 @@ export class PowderSim {
       } else if (ti === PT.PROT) {
         if (rt === PT.INVIS) this.changeType(i, x, y, PT.NEUT);
       }
+      else if ((ti === PT.BIZR || ti === PT.BIZRG) && rt === PT.FILT) this.ctype[i] = filtInteract(this, rid, this.ctype[i]);
       return 1;
     }
     switch (rt) {
