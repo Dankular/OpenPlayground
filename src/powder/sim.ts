@@ -65,6 +65,8 @@ export class PowderSim {
   nextFree: Int32Array; active = 0; pfree = -1; numParts = 0;
 
   pmap: Int32Array; photons: Int32Array; pmapCount: Int32Array;
+  /** Optional per-pixel mask of external solids (rigid bodies). Non-energy particles cannot move into marked pixels. */
+  solid: Uint8Array | null = null;
   bmap: Uint8Array; emap: Uint8Array; blockAir: Uint8Array; blockAirH: Uint8Array;
   // air, per CELL block
   avx: Float32Array; avy: Float32Array; pv: Float32Array; hv: Float32Array; fvx: Float32Array; fvy: Float32Array;
@@ -228,19 +230,24 @@ export class PowderSim {
   }
 
   // ---- gravity --------------------------------------------------------------------------------------------------------
-  /** Writes into this.pGravX / pGravY. */
-  gravityField(x: number, y: number, particleGrav: number): [number, number] {
+  /** Gravity vector at (x, y) for a particle with the given Gravity property; result in this.gfx / this.gfy (no allocation). */
+  gfx = 0; gfy = 0;
+  gravityXY(x: number, y: number, particleGrav: number): void {
     switch (this.gravityMode) {
-      case GRAV.OFF: return [0, 0];
+      case GRAV.OFF: this.gfx = 0; this.gfy = 0; return;
       case GRAV.RADIAL: {
         const dx = x - (this.XRES >> 1), dy = y - (this.YRES >> 1);
-        if (!dx && !dy) return [0, 0];
+        if (!dx && !dy) { this.gfx = 0; this.gfy = 0; return; }
         const d = 0.01 - Math.hypot(dx, dy);
-        return [particleGrav * (dx / d), particleGrav * (dy / d)];
+        this.gfx = particleGrav * (dx / d); this.gfy = particleGrav * (dy / d); return;
       }
-      case GRAV.CUSTOM: return [particleGrav * this.customGravityX, particleGrav * this.customGravityY];
-      default: return [0, particleGrav];
+      case GRAV.CUSTOM: this.gfx = particleGrav * this.customGravityX; this.gfy = particleGrav * this.customGravityY; return;
+      default: this.gfx = 0; this.gfy = particleGrav;
     }
+  }
+  gravityField(x: number, y: number, particleGrav: number): [number, number] {
+    this.gravityXY(x, y, particleGrav);
+    return [this.gfx, this.gfy];
   }
 
   // ---- movement evaluation --------------------------------------------------------------------------------------------
@@ -286,6 +293,7 @@ export class PowderSim {
         default: result = 1;
       }
     }
+    if (this.solid !== null && result !== 0 && this.solid[ny * this.XRES + nx] && !(this.E[pt].Properties & TYPE_ENERGY)) return 0;
     const c = this.cell(nx, ny), wall = this.bmap[c];
     if (wall) {
       if (this.isWallBlocking(nx, ny, pt)) return 0;
@@ -575,7 +583,7 @@ export class PowderSim {
     this.surroundSpace = space; this.nt = nt;
     const e = this.E[t];
     this.pGravX = 0; this.pGravY = 0;
-    if (!(e.Properties & TYPE_SOLID) && (e.Gravity || e.NewtonianGravity)) [this.pGravX, this.pGravY] = this.gravityField(x, y, e.Gravity);
+    if (!(e.Properties & TYPE_SOLID) && (e.Gravity || e.NewtonianGravity)) { this.gravityXY(x, y, e.Gravity); this.pGravX = this.gfx; this.pGravY = this.gfy; }
   }
 
   // ---- per-frame --------------------------------------------------------------------------------------------------------
@@ -734,8 +742,8 @@ export class PowderSim {
       let gelScale = 1;
       if (t === PT.GEL) gelScale = this.tmp[i] * 2.55;
       if ((E[t].Properties & TYPE_LIQUID) && (t !== PT.GEL || gelScale > 1 + this.rng.between(0, 254))) {
-        const [gx, gy] = this.gravityField(x, y, -2);
-        const ox = clampf(Math.round(gx + x), x - 1, x + 1), oy = clampf(Math.round(gy + y), y - 1, y + 1);
+        this.gravityXY(x, y, -2);
+        const ox = clampf(Math.round(this.gfx + x), x - 1, x + 1), oy = clampf(Math.round(this.gfy + y), y - 1, y + 1);
         if (ox !== x || oy !== y) {
           const r = this.pmap[oy * XRES + ox];
           if (r && this.type[i] === TYP(r) && this.temp[i] > this.temp[ID(r)]) { const s = this.temp[i]; this.temp[i] = this.temp[ID(r)]; this.temp[ID(r)] = s; }
@@ -770,18 +778,12 @@ export class PowderSim {
         for (let j = 0; j < 8; j++) this.temp[conduct[j]] = pt;
 
         let ctemph = pt, ctempl = pt;
-        const isElem = (n: number) => n > 0 && n < E.length && !!E[n].Enabled;
-        const isElemOrNone = (n: number) => n === 0 || isElem(n);
         const pres = this.pv[c];
-        if (((E[t].Properties & TYPE_LIQUID) && isElemOrNone(E[t].HighTemperatureTransition) && E[E[t].HighTemperatureTransition] && (E[E[t].HighTemperatureTransition].Properties & TYPE_GAS)) || t === PT.LNTG || t === PT.SLTW) ctemph -= 2 * pres;
-        else if (((E[t].Properties & TYPE_GAS) && isElemOrNone(E[t].LowTemperatureTransition) && E[E[t].LowTemperatureTransition] && (E[E[t].LowTemperatureTransition].Properties & TYPE_LIQUID)) || t === PT.WTRV) ctempl -= 2 * pres;
+        if (((E[t].Properties & TYPE_LIQUID) && this.isElemOrNone(E[t].HighTemperatureTransition) && E[E[t].HighTemperatureTransition] && (E[E[t].HighTemperatureTransition].Properties & TYPE_GAS)) || t === PT.LNTG || t === PT.SLTW) ctemph -= 2 * pres;
+        else if (((E[t].Properties & TYPE_GAS) && this.isElemOrNone(E[t].LowTemperatureTransition) && E[E[t].LowTemperatureTransition] && (E[E[t].LowTemperatureTransition].Properties & TYPE_LIQUID)) || t === PT.WTRV) ctempl -= 2 * pres;
         let s = 1;
-        if ((t === PT.ICEI || t === PT.SNOW) && (!isElem(this.ctype[i]) || this.ctype[i] === PT.ICEI || this.ctype[i] === PT.SNOW)) this.ctype[i] = PT.WATR;
+        if ((t === PT.ICEI || t === PT.SNOW) && (!this.isElem(this.ctype[i]) || this.ctype[i] === PT.ICEI || this.ctype[i] === PT.SNOW)) this.ctype[i] = PT.WATR;
         const el = E[t];
-        const cellPress = () => {
-          const g = (xx: number, yy: number) => this.pv[this.cell(xx, yy)];
-          return Math.max((g(x, y) + g(x, y - 2) + g(x, y + 2) + g(x - 2, y) + g(x + 2, y)) * 2, 0);
-        };
         if (el.HighTemperatureTransition !== NT && ctemph >= el.HighTemperature) {
           if (el.HighTemperatureTransition !== ST) {
             if (t === PT.FOG) this.ctype[i] = 0;
@@ -799,7 +801,7 @@ export class PowderSim {
               if (ctemph < E[this.ctype[i]].HighTemperature) s = 0; else { t = PT.LAVA; this.type[i] = PT.TUNG; }
             } else if (ctemph >= el.HighTemperature) t = PT.LAVA; else s = 0;
           } else if (t === PT.CRMC) {
-            if (ctemph < cellPress() + E[PT.CRMC].HighTemperature) s = 0; else t = PT.LAVA;
+            if (ctemph < this.cellPress(x, y) + E[PT.CRMC].HighTemperature) s = 0; else t = PT.LAVA;
           } else if (t === PT.RIME) {
             if (this.tmp[i] > 5) { t = PT.ACID; this.life[i] = 25 + 5 * this.tmp[i]; this.tmp[i] = 0; }
             else { t = this.ctype[i] === PT.DSTW ? PT.DSTW : PT.WATR; this.ctype[i] = 0; }
@@ -813,7 +815,7 @@ export class PowderSim {
               if (ct === PT.THRM && pt >= E[PT.BMTL].HighTemperature) s = 0;
               else if ((ct === PT.VIBR || ct === PT.BVBR) && pt >= 273.15) s = 0;
               else if (ct === PT.TUNG) { if (pt >= E[ct].HighTemperature) s = 0; }
-              else if (ct === PT.CRMC) { if (ctemph >= cellPress() + E[PT.CRMC].HighTemperature) s = 0; }
+              else if (ct === PT.CRMC) { if (ctemph >= this.cellPress(x, y) + E[PT.CRMC].HighTemperature) s = 0; }
               else if (E[ct].HighTemperatureTransition === PT.LAVA || ct === PT.HEAC) { if (pt >= E[ct].HighTemperature) s = 0; }
               else if (pt >= 973) s = 0;
               if (s) {
@@ -901,6 +903,12 @@ export class PowderSim {
     return transitionOccurred;
   }
   private conductScratch = new Int32Array(8);
+  private isElem(n: number) { return n > 0 && n < this.E.length && !!this.E[n].Enabled; }
+  private isElemOrNone(n: number) { return n === 0 || this.isElem(n); }
+  private cellPress(x: number, y: number) {
+    const g = (xx: number, yy: number) => this.pv[this.cell(xx, yy)];
+    return Math.max((g(x, y) + g(x, y - 2) + g(x, y + 2) + g(x - 2, y) + g(x + 2, y)) * 2, 0);
+  }
 
   // ---- movement phase ------------------------------------------------------------------------------------------------
   private movementPhase(i: number): void {
@@ -1024,7 +1032,7 @@ export class PowderSim {
       const ptGrav = E[t].Gravity, rt = rtSearch;
       let s = 0, nxf = clearXf, nyf = clearYf, nx = clearX, ny = clearY, prevX = 0, prevY = 0;
       for (let j = 0; j < rt; j++) {
-        [pGravX, pGravY] = this.gravityField(nx, ny, ptGrav);
+        this.gravityXY(nx, ny, ptGrav); pGravX = this.gfx; pGravY = this.gfy;
         const mv = Math.max(Math.abs(pGravX), Math.abs(pGravY));
         if (mv < 0.0001) break;
         pGravX /= mv; pGravY /= mv;
@@ -1042,7 +1050,7 @@ export class PowderSim {
       if (s === 1) {
         clearX = nx; clearY = ny;
         for (let j = 0; j < rt; j++) {
-          [pGravX, pGravY] = this.gravityField(nx, ny, ptGrav);
+          this.gravityXY(nx, ny, ptGrav); pGravX = this.gfx; pGravY = this.gfy;
           const mv = Math.max(Math.abs(pGravX), Math.abs(pGravY));
           if (mv < 0.0001) break;
           pGravX /= mv; pGravY /= mv;
@@ -1147,16 +1155,20 @@ export class PowderSim {
   }
 
   // ---- air ------------------------------------------------------------------------------------------------------------------
+  private offs: Int32Array | null = null;
+  private kernelOffsets(XC: number): Int32Array {
+    return this.offs ??= Int32Array.from([-XC - 1, -XC, -XC + 1, -1, 0, 1, XC - 1, XC, XC + 1]);
+  }
   updateAir(): void {
     if (this.airMode === AIR.NOUPDATE) return;
     const XC = this.XCELLS, YC = this.YCELLS, vx = this.avx, vy = this.avy, pv = this.pv, k = this.kernel;
     const mix = (a: number, b: number, f: number) => a + (b - a) * f;
-    for (let i = 0; i < YC; i++) for (const x of [0, 1, XC - 2, XC - 1]) {
-      const c = i * XC + x;
+    for (let i = 0; i < YC; i++) for (let e = 0; e < 4; e++) {
+      const c = i * XC + (e < 2 ? e : XC - 4 + e);
       pv[c] = mix(this.edgePressure, pv[c], 0.8); vx[c] = mix(this.edgeVelocityX, vx[c], 0.9); vy[c] = mix(this.edgeVelocityY, vy[c], 0.9);
     }
-    for (let i = 0; i < XC; i++) for (const y of [0, 1, YC - 2, YC - 1]) {
-      const c = y * XC + i;
+    for (let i = 0; i < XC; i++) for (let e = 0; e < 4; e++) {
+      const c = (e < 2 ? e : YC - 4 + e) * XC + i;
       pv[c] = mix(this.edgePressure, pv[c], 0.8); vx[c] = mix(this.edgeVelocityX, vx[c], 0.9); vy[c] = mix(this.edgeVelocityY, vy[c], 0.9);
     }
     const ba = this.blockAir;
@@ -1181,7 +1193,13 @@ export class PowderSim {
     for (let y = 0; y < YC; y++) for (let x = 0; x < XC; x++) {
       const c = y * XC + x;
       let dx = 0, dy = 0, dp = 0;
-      for (let j = -1; j < 2; j++) for (let i = -1; i < 2; i++) {
+      if (y > 1 && y < YC - 2 && x > 1 && x < XC - 2) {
+        const offs = this.kernelOffsets(XC);
+        for (let n = 0; n < 9; n++) {
+          const f = k[n], cc = c + offs[n];
+          if (!ba[cc]) { dx += vx[cc] * f; dy += vy[cc] * f; dp += pv[cc] * f; } else { dx += vx[c] * f; dy += vy[c] * f; dp += pv[c] * f; }
+        }
+      } else for (let j = -1; j < 2; j++) for (let i = -1; i < 2; i++) {
         const f = k[i + 1 + (j + 1) * 3];
         if (y + j > 0 && y + j < YC - 1 && x + i > 0 && x + i < XC - 1 && !ba[(y + j) * XC + x + i]) {
           const cc = (y + j) * XC + x + i;
