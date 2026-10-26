@@ -1,0 +1,2 @@
+.powder-panel{width:240px}.powder-panel input[type=range]{width:100%;accent-color:#bada96}.powder-panel optgroup{color:#7f9d6e;font-style:normal}.powder-panel option{color:#d1e3c6}#powder-readout{margin-top:12px}.powder-panel>small{margin-top:9px}#viewport.powder-drawing canvas{cursor:crosshair}
+@media(max-width:800px){.powder-panel{width:195px}}

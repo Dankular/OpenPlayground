@@ -33,6 +33,8 @@ import {ExplosionSystem} from './systems/explosions';
 import {ShrapnelSystem} from './systems/shrapnel';
 import {VisualTransforms} from './visual-transforms';
 import {ParticleSystemView} from './particles';
+import {PowderWorld} from './powder/world';
+import {PowderUI} from './powder/powder-ui';
 
 const icons: Record<string, string> = {
  human: '<circle cx="24" cy="9" r="5"/><path d="M19 17h10l2 15h-6v14h-4V32h-6z"/><path d="m17 19-5 15m19-15 5 15"/>',
@@ -82,7 +84,8 @@ const defibrillators=new DefibrillatorSystem(physical,ragdolls,{isDisabled:disab
 sim.onSpawn.push(e=>defibrillators.attach(e));sim.onRemove.push(e=>defibrillators.remove(e));sim.beforeStep.push(dt=>defibrillators.beforeStep(dt));
 const liquidDevices=new LiquidDeviceSystem(liquids,physical,{isDisabled:disabled,isDestroyed:part=>machinery.get(part.body.getUserData() as Entity).some(s=>s.part===part&&s.destroyed),setRendererEnabled:(e,id,enabled)=>view.setRendererEnabled(e,id,enabled),isBeingUsedContinuously:part=>(heldReceivers.get(part)?.until??-1)>=continuousTime,onSound:(state,clip,volume)=>{if(audioUnlocked)audio.play(audioPointer(state.component,clip),state.component.file??'sharedassets0.assets',{position:state.part.body.getPosition(),volume});},audioDuration:(entity,clip)=>{const component=entity.metadata?.nodes.flatMap(n=>n.components).find(c=>audioPointer(c,clip));return audio.index&&component?resolveAudioReference(audio.index,component.file??'sharedassets0.assets',audioPointer(component,clip))?.duration:undefined;}});
 sim.onSpawn.push(e=>liquidDevices.attach(e));sim.onRemove.unshift(e=>liquidDevices.remove(e));sim.beforeStep.push(dt=>{updateLiquidParticles();liquidDevices.beforeStep(dt);});
-const explosions=new ExplosionSystem(sim,ragdolls,{fixtureLayer,isUnderWater:point=>environment.isPointUnderWater(point),onFragment:(part,force)=>{machinery.fragment(part,force);syringeBreaks.fragment(part);weapons.fragmentHit(part);},onSlice:part=>{ragdolls.slice(part);machinery.slice(part);},onBreak:part=>{machinery.break(part);syringeBreaks.break(part);},onEffect:parameters=>view.addExplosion(parameters.Position,parameters.Range),onShrapnel:(point,count)=>shrapnel.emit(point,count)});
+const powder=new PowderWorld({seed:Date.now()&0xffff});
+const explosions=new ExplosionSystem(sim,ragdolls,{fixtureLayer,isUnderWater:point=>environment.isPointUnderWater(point),onFragment:(part,force)=>{machinery.fragment(part,force);syringeBreaks.fragment(part);weapons.fragmentHit(part);},onSlice:part=>{ragdolls.slice(part);machinery.slice(part);},onBreak:part=>{machinery.break(part);syringeBreaks.break(part);},onEffect:parameters=>{view.addExplosion(parameters.Position,parameters.Range);powder.injectPressure(parameters.Position.x,parameters.Position.y,parameters.Range*.6,Math.min(80,parameters.Range*14));},onShrapnel:(point,count)=>shrapnel.emit(point,count)});
 const weapons=new WeaponSystem(sim,physical,{isDisabled:disabled,onHit:hit=>{ragdolls.shot(hit.part,{damage:hit.damage,point:hit.point,normal:hit.normal,exit:hit.exit});if(!hit.exit){machinery.shot(hit.part,hit.damage);vehicles.shot(hit.part,hit.damage);}liquidDevices.shot(hit.part,hit);projectiles.shot(hit.part,hit.damage);syringeBreaks.shot(hit.part,hit.exit);},onFragment:(part,force)=>{machinery.fragment(part,force);syringeBreaks.fragment(part);},onFragmentation:parameters=>explosions.explode(parameters),onSlice:part=>{ragdolls.slice(part);machinery.slice(part);},onTrace:trace=>view.addTracer(trace),onExplosion:(position,range)=>view.addExplosion(position,range),onShot:(e,c,first)=>{if(audioUnlocked)audio.firearm(e,c,first);}});
 sim.onSpawn.push(e=>weapons.attach(e));sim.onRemove.push(e=>weapons.remove(e));sim.beforeStep.push(dt=>weapons.beforeStep(dt));
 const shrapnel=new ShrapnelSystem(sim,physical,{onHit:hit=>{ragdolls.shot(hit.part,{damage:hit.damage,point:hit.point,normal:hit.normal,exit:hit.exit});weapons.receiveShot(hit.part,hit.exit);if(!hit.exit){machinery.shot(hit.part,hit.damage);vehicles.shot(hit.part,hit.damage);}liquidDevices.shot(hit.part,hit);projectiles.shot(hit.part,hit.damage);syringeBreaks.shot(hit.part,hit.exit);}});
@@ -114,6 +117,10 @@ sim.world.on('begin-contact',contact=>enteringContacts.add(contact));sim.world.o
 sim.world.on('post-solve',(contact,impulse)=>{if(!enteringContacts.delete(contact))return;const amount=impulse.normalImpulses[0]??0;for(const body of [contact.getFixtureA().getBody(),contact.getFixtureB().getBody()]){const entity=body.getUserData() as Entity|undefined;const part=entity?.parts?.find(p=>p.body===body);if(part){ragdolls.impact(part,amount);if(audioUnlocked)audio.impact(part,amount);}}});
 const view = new SandboxRenderer($('#viewport'),sim,bodyShaders);
 const particles=new ParticleSystemView(view.scene,{gravity:()=>sim.world.getGravity()});sim.onSpawn.push(e=>particles.attach(e));sim.onRemove.unshift(e=>particles.remove(e));
+// Powder-grid simulation (ported from The Powder Toy); disabled until the powder tool is first opened.
+powder.enabled=false;
+sim.beforeStep.push(dt=>{if(!powder.enabled)return;const gravity=sim.world.getGravity();powder.setGravity(gravity.x,gravity.y);powder.setAmbientCelsius(physical.ambientTemperature);powder.couple(sim.world,{physicalFor:body=>physical.getByBody(body)});powder.advance(dt);});
+sim.sceneAdapters.set('powder',{capture:()=>powder.sim.numParts>0||powder.sim.bmap.some(w=>w)?powder.serialize():null,restore:(_entities,value)=>{const previous=powder.serialize(),wasEnabled=powder.enabled,undo=()=>{powder.deserialize(previous);powder.enabled=wasEnabled;};if(value===null){powder.clear();return undo;}if(!powder.deserialize(value))return false;powderUI.adopt();return undo;}});
 function updateLiquidParticles(){
   for(const entity of sim.renderEntities)for(const state of liquidDevices.get(entity)){
     if(!['LiquidOutletBehaviour','LiquidContainerHoleBehaviour'].includes(state.kind))continue;
@@ -162,12 +169,13 @@ let firstAnchor:WireEndpoint|null=null,wireDragging=false,wireDown={x:0,y:0},wir
 let category='All';
 let showAll=false;
 if(library){const filter=document.createElement('label');filter.className='show-all';filter.innerHTML='<input type="checkbox" id="show-all-objects"> Show all objects';$('.categories').after(filter);$('#show-all-objects').onchange=()=>{showAll=$<HTMLInputElement>('#show-all-objects').checked;const chosen=items.find(i=>i.id===selectedKind);if(!showAll&&chosen&&(!chosen.visible||chosen.locked))choose(null);else renderCatalog();};}
-let pointerMode: 'pan' | 'drag' | 'wire' | null = null;
+let pointerMode: 'pan' | 'drag' | 'wire' | 'powder' | null = null;
 let lastPointer = {x:0,y:0};
 let toastTimer: ReturnType<typeof setTimeout>;
 let sceneGeneration=0;
 const connectionBar=document.createElement('div');connectionBar.className='workspace-tools';connectionBar.innerHTML='<button id="interact-tool" data-icon="↖" class="active" title="Interact (V)">↖ Interact</button><button id="connect-tool" data-icon="⌁" title="Connect objects (W)">⌁ Connect</button><button id="remove-wire-tool" data-icon="×" title="Remove connections (X)">× Links</button>';
 $('.workspace-top').insertBefore(connectionBar,$('.engine-label'));
+const powderUI=new PowderUI({viewport:$('#viewport'),toolbar:connectionBar,world:powder,scene:view.scene,cameraCenter:()=>({x:view.center.x,y:view.center.y}),toast:message=>toast(message),onActivate:()=>choose(null)});
 const connectionPanel=document.createElement('aside');connectionPanel.id='connection-panel';connectionPanel.className='connection-panel';connectionPanel.hidden=true;
 connectionPanel.innerHTML=`<span class="eyebrow">CONNECTION TOOL</span><label for="connection-kind">Connection</label><select id="connection-kind">${CONNECTION_TOOLS.map(tool=>`<option value="${tool.kind}">${tool.name}</option>`).join('')}</select><label for="connection-channel" id="connection-channel-label">Activation channel</label><select id="connection-channel"><option value="0">0 · Green</option><option value="1">1 · Red</option><option value="2">2 · Blue</option></select><p id="connection-description"></p><span id="connection-status">Choose the source object.</span><button id="cancel-connection" disabled>Cancel first anchor <kbd>Esc</kbd></button><small>Click two points or drag between them.</small>`;
 $('#viewport').append(connectionPanel);$<HTMLSelectElement>('#connection-kind').value=connectionKind;
@@ -194,7 +202,7 @@ function updateConnectionTools(){
   if(interactionTool!=='interact')$('#placement-hint').textContent=interactionTool==='remove-wire'?'Click a connection to remove it.':'Connect two points · Esc cancels · V returns to interact';
 }
 function setInteractionTool(tool:'interact'|'connect'|'remove-wire'){
-  sim.endDrag();pointerMode=null;selectedKind=null;interactionTool=tool;select(null);cancelConnection();renderCatalog();$('#viewport').classList.remove('placing');updateConnectionTools();
+  powderUI.setActive(false);sim.endDrag();pointerMode=null;selectedKind=null;interactionTool=tool;select(null);cancelConnection();renderCatalog();$('#viewport').classList.remove('placing');updateConnectionTools();
 }
 function finishConnection(point:{x:number;y:number}){
   if(!firstAnchor)return;const start=firstAnchor,end=endpointAt(point);
@@ -216,6 +224,7 @@ function renderCatalog() {
 }
 function choose(kind: string|null) {
   const item=items.find(i=>i.id===kind);if(item&&!showAll&&(!item.visible||item.locked))return;
+  powderUI.setActive(false);
   selectedKind=kind;renderCatalog();
   interactionTool='interact';cancelConnection();updateConnectionTools();
   $('#viewport').classList.toggle('placing',!!kind);
@@ -290,7 +299,7 @@ $('#speed').onchange=()=>sim.speed=Number($<HTMLSelectElement>('#speed').value);
 $('#home').onclick=resetCameraForMap;
 const zoom=(factor:number)=>{const r=$('#viewport').getBoundingClientRect();view.zoom(factor,r.left+r.width/2,r.top+r.height/2);};
 $('#zoom-in').onclick=()=>zoom(.8);$('#zoom-out').onclick=()=>zoom(1.25);
-$('#clear').onclick=()=>{sceneGeneration++;wires.clear();sim.clear();cancelConnection();view.clearEffects();audio.stop();select(null);choose(selectedKind);toast('Chamber cleared');};
+$('#clear').onclick=()=>{sceneGeneration++;wires.clear();sim.clear();powder.clear();cancelConnection();view.clearEffects();audio.stop();select(null);choose(selectedKind);toast('Chamber cleared');};
 $('#help').onclick=()=>$<HTMLDialogElement>('#help-dialog').showModal();
 $('#close-help').onclick=()=>$<HTMLDialogElement>('#help-dialog').close();
 $('#export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(sim.serialize(),null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='open-playground-scene.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Scene saved');};
@@ -306,7 +315,7 @@ $('#scene-file').onchange=async()=>{
       if(ids.length>CONFIG.maxEntities)throw new Error('Scene has too many objects');await Promise.all(ids.map(id=>library.loadPrefab!(id)));
     }
     if(generation!==sceneGeneration)throw new Error('Scene load cancelled');
-    sim.import(data);cancelConnection();view.clearEffects();audio.stop();applyMapSettings();resetCameraForMap();select(null);choose(null);toast('Scene opened');
+    sim.import(data);if(!data.systems?.powder)powder.clear();cancelConnection();view.clearEffects();audio.stop();applyMapSettings();resetCameraForMap();select(null);choose(null);toast('Scene opened');
   }catch(error){toast(error instanceof Error?error.message:'Could not open scene');}input.value='';
 };
 const canvas=view.renderer.domElement;
@@ -317,6 +326,7 @@ canvas.onpointerdown=async e=>{
   if(e.button===1||e.button===2){pointerMode='pan';canvas.style.cursor='grabbing';return;}
   const p=view.toWorld(e.clientX,e.clientY);
   wirePointer=p;
+  if(powderUI.active){pointerMode='powder';powderUI.pointerDown(p);return;}
   if(interactionTool==='remove-wire'){const wire=view.connections.pick(p,view.viewHeight/Math.max(1,$('#viewport').clientHeight)*7);if(wire){wires.disconnect(wire);if(selectedWire?.id===wire.id)select(null);}return;}
   if(interactionTool==='connect'){
     if(firstAnchor){finishConnection(p);return;}
@@ -329,11 +339,12 @@ canvas.onpointerdown=async e=>{
 };
 canvas.onpointermove=e=>{
   wirePointer=view.toWorld(e.clientX,e.clientY);if(pointerMode==='wire'&&Math.hypot(e.clientX-wireDown.x,e.clientY-wireDown.y)>6)wireDragging=true;
+  if(pointerMode==='powder')powderUI.pointerMove(wirePointer,true);else if(powderUI.active)powderUI.pointerMove(wirePointer,false);
   if(pointerMode==='pan')view.pan(e.clientX-lastPointer.x,e.clientY-lastPointer.y);
   if(pointerMode==='drag'){const p=view.toWorld(e.clientX,e.clientY);if(sim.paused&&selected){const target=sim.drag?.getTarget();if(target){const dx=p.x-target.x,dy=p.y-target.y;selected.parts.forEach(part=>{const pos=part.body.getPosition();part.body.setTransform({x:pos.x+dx,y:pos.y+dy},part.body.getAngle());});}}sim.moveDrag(p.x,p.y);}
   lastPointer={x:e.clientX,y:e.clientY};
 };
-function endPointer(){sim.endDrag();pointerMode=null;canvas.style.cursor='';}
+function endPointer(){powderUI.pointerUp();sim.endDrag();pointerMode=null;canvas.style.cursor='';}
 canvas.onpointerup=e=>{if(pointerMode==='wire'&&wireDragging)finishConnection(view.toWorld(e.clientX,e.clientY));endPointer();};canvas.onpointercancel=()=>{cancelConnection();endPointer();};canvas.onlostpointercapture=endPointer;
 canvas.addEventListener('wheel',e=>{e.preventDefault();view.zoom(Math.exp(e.deltaY*.001),e.clientX,e.clientY);},{passive:false});
 function releaseInput(){if(inputHeld){weapons.setHeld(inputHeld.entity,false,inputHeld.part);projectiles.setHeld(inputHeld.entity,false,inputHeld.part);}inputHeld=null;continuousAccumulator=0;}
@@ -368,7 +379,7 @@ function animate(now:number){
   const scaled=sim.paused?0:Math.min(dt,.1)*sim.speed;
   if(inputHeld&&!sim.paused){continuousAccumulator+=scaled;for(let emitted=0;continuousAccumulator>=.025&&emitted<4;emitted++){continuousAccumulator-=.025;if(sim.entities.includes(inputHeld.entity))useEntity(inputHeld.entity,inputHeld.channel,true,inputHeld.part);}}
   if(!sim.paused){physical.frame(scaled,sim.speed);devices.frame(scaled);environment.frame(scaled);liquidDevices.frame(scaled);liquids.frame(scaled);}
-  sim.update(dt);shrapnel.afterFrame();particles.update(scaled);view.updateEffects(scaled);
+  sim.update(dt);shrapnel.afterFrame();particles.update(scaled);view.updateEffects(scaled);powderUI.frame();
   if(selected&&!sim.entities.includes(selected))select(null);
   if(selectedWire&&!wires.wires.has(selectedWire.id))select(null);
   view.connections.preview=firstAnchor?{a:endpointPoint(firstAnchor),b:wirePointer,kind:connectionKind,channel:connectionChannel}:null;

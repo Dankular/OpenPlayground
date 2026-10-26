@@ -19,6 +19,12 @@ fixed, spring, chain and bandage links. Source piston/servo, vehicle controls an
 liquid-device controllers are implemented, alongside eleven recovered resource
 projectile prefabs and their launcher/impact behaviors.
 
+A **powder grid** (toolbar button *Powder*, key `P`) ports the particle, chemistry and element physics of
+[The Powder Toy](https://github.com/The-Powder-Toy/The-Powder-Toy): about 190 elements, a pressure/air/ambient-heat solver,
+heat conduction and state changes, fire, explosives, electronics, radiation and optics. Rigid bodies block, heat, ignite and
+wet the grid and are pushed by its pressure. It is GPL-3.0-derived code; see `src/powder/NOTICE.md` and `research/POWDER.md`
+for provenance, the per-element coverage ledger and what is not ported.
+
 **This is not yet a complete rewrite or a verified equivalent of the native
 game.** The catalogue references 238 distinct script classes; many still need
 implementation, and implemented systems have explicit fidelity gaps. See the
