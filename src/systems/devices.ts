@@ -22,6 +22,7 @@ export class DeviceSystem {
     gravity?: { x: number; y: number };
     setRendererEnabled?: (entity: Entity, pathId: string, enabled: boolean) => void;
     isDestroyed?: (part: Part) => boolean;
+    isDisabled?: (entity: Entity, component: SourceComponent) => boolean;
   } = {}) {}
 
   attach(entity: Entity): void {
@@ -43,7 +44,7 @@ export class DeviceSystem {
   use(entity: Entity, channel = 0): boolean {
     let changed = false;
     for (const device of this.states.get(entity) ?? []) {
-      if (this.options.isDestroyed?.(device.part)) continue;
+      if (this.options.isDestroyed?.(device.part) || this.options.isDisabled?.(entity, device.component)) continue;
       if (device.kind === 'RotorBehaviour' && channel === 1) device.speed = -device.speed;
       else { device.active = !device.active; if (device.kind === 'GeneratorBehaviour') device.warmup = 0; }
       this.updateLight(device); changed = true;
@@ -58,6 +59,7 @@ export class DeviceSystem {
   frame(dt: number): void {
     for (const devices of this.states.values()) for (const d of devices) {
       if (d.kind !== 'GeneratorBehaviour') continue;
+      if (this.options.isDisabled?.(d.entity, d.component)) continue;
       const physical = this.physical.get(d.part); if (!physical) continue;
       const config = d.component.data;
       d.warmup = Math.max(0, Math.min(1, d.warmup));
@@ -74,7 +76,7 @@ export class DeviceSystem {
     for (const devices of this.states.values()) for (const d of devices) {
       const body = d.part.body, physical = this.physical.get(d.part), data = d.component.data;
       const charge = physical ? getCharge(physical) : 0;
-      const destroyed = this.options.isDestroyed?.(d.part) ?? false;
+      const destroyed = (this.options.isDestroyed?.(d.part) ?? false) || (this.options.isDisabled?.(d.entity, d.component) ?? false);
       if (d.kind === 'RotorBehaviour') {
         const joint = d.entity.jointById?.get(pointer(data.Hinge));
         if (joint instanceof RevoluteJoint) {

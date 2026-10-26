@@ -9,8 +9,11 @@ BOUNDARIES = {
     "PhysicalBehaviour": ("src/systems/physical.ts", "thermal/charge/contact subset"),
     "PersonBehaviour": ("src/systems/ragdoll.ts", "poses/standing/scalar physiology subset"),
     "LimbBehaviour": ("src/systems/ragdoll.ts", "motor/damage/temperature/bone subset"),
-    "CirculationBehaviour": ("src/systems/ragdoll.ts", "scalar blood-flow/bleeding subset"),
+    "CirculationBehaviour": ("src/systems/liquids.ts", "mixed-liquid transport linked to ragdoll circulation; native parity unverified"),
     "ConnectedNodeBehaviour": ("src/systems/ragdoll.ts", "limb connectivity subset"),
+    "SkinMaterialHandler": ("src/systems/skin.ts", "wound state/native body shader adaptation; native pixel parity unverified"),
+    "DamagableMachineryBehaviour": ("src/systems/machinery.ts", "health/thermal/water/failure gates/repair; destruction presentation and UnityEvents incomplete"),
+    "DefibrillatorBehaviour": ("src/systems/defibrillator.ts", "timed pad-local circulation shock; native runtime comparison unverified"),
     "GeneratorBehaviour": ("src/systems/devices.ts", "charge/warmup/heat/vibration"),
     "HeatingElementBehaviour": ("src/systems/devices.ts", "temperature controller"),
     "HoverboxBehaviour": ("src/systems/devices.ts", "gravity cancellation/damping"),
@@ -19,6 +22,15 @@ BOUNDARIES = {
     "FirearmBehaviour": ("src/systems/weapons.ts", "firing/ballistics/recoil/heat; presentation partial"),
     "ExplosiveBehaviour": ("src/systems/weapons.ts", "fuse/triggers/fragmentation; presentation partial"),
 }
+for syringe_class in (
+    "AcidSyringe", "AdrenalineSyringe", "BoneEatingPoisonSyringe", "CoagulationSyringe",
+    "DeathSyringe", "EmptySyringe", "FreezeSyringe", "KnockoutSyringe", "LifeSyringe",
+    "MendingSyringe", "PainKillerSyringe", "PinkSyringe", "UltraStrengthSyringe",
+    "WaterBreathingSyringe", "ZombieSyringe",
+):
+    BOUNDARIES[syringe_class] = ("src/systems/liquids.ts", "source reservoirs/pressure/lodging/liquid effects; presentation and native equivalence incomplete")
+for container_class in ("FlaskBehaviour", "LiquidCanisterBehaviour", "BloodTankBehaviour"):
+    BOUNDARIES[container_class] = ("src/systems/liquids.ts", "reservoir/source state; full controller/network presentation incomplete")
 
 def main():
     root = Path(__file__).resolve().parents[1]

@@ -26,6 +26,7 @@ export class WeaponSystem {
     onShot?: (entity: Entity, component: SourceComponent, firstShot: boolean) => void;
     resolveCartridge?: (component: SourceComponent, entity: Entity) => Cartridge | null;
     random?: () => number;
+    isDisabled?: (entity: Entity, component: SourceComponent) => boolean;
   } = {}) {
     this.ballistics = new BallisticsSystem(simulation.world, physical, {
       onTrace: options.onTrace, random: options.random,
@@ -76,12 +77,13 @@ export class WeaponSystem {
   use(entity: Entity): boolean {
     let used = false;
     for (const gun of this.guns.get(entity) ?? []) {
-      if (gun.component.data.IgnoreUse || !gun.cartridge) continue;
+      if (gun.component.data.IgnoreUse || !gun.cartridge || this.options.isDisabled?.(entity, gun.component)) continue;
       gun.shotIndex = 0; const delay = num(gun.component.data.FireDelay, 0);
       if (delay > 0) gun.pending.push(delay); else this.fire(gun);
       used = true;
     }
     for (const explosive of this.explosives.get(entity) ?? []) {
+      if (this.options.isDisabled?.(entity, explosive.component)) continue;
       if (explosive.component.data.ArmOnUse === 0 || explosive.component.data.ArmOnUse === false) continue;
       this.arm(explosive); used = true;
     }
@@ -119,12 +121,14 @@ export class WeaponSystem {
   }
   beforeStep(dt: number): void {
     for (const guns of this.guns.values()) for (const gun of guns) {
+      if (this.options.isDisabled?.(gun.entity, gun.component)) {gun.pending=[];gun.held=false;continue;}
       gun.timer += dt;
       gun.pending = gun.pending.filter(delay => { if (delay <= dt) { this.fire(gun); return false; } return true; }).map(delay => delay - dt);
       if (gun.held && gun.component.data.Automatic && gun.shotIndex !== 0 && gun.timer > num(gun.component.data.AutomaticFireInterval, .05)) this.fire(gun);
     }
     const explodeNow: ExplosiveState[] = [];
     for (const explosives of this.explosives.values()) for (const ex of explosives) {
+      if (this.options.isDisabled?.(ex.entity, ex.component)) continue;
       const p = this.physical.get(ex.part), c = ex.component.data;
       if (p && (p.state.temperature >= num(c.TemperatureLimit, 500) ||
           (num(c.ExplodeBurnProgressThreshold, 2) < 1 && p.state.burnProgress > num(c.ExplodeBurnProgressThreshold, 2)) ||
@@ -136,7 +140,7 @@ export class WeaponSystem {
   }
   private random(): number { return (this.options.random ?? Math.random)(); }
   private fire(gun: GunState): void {
-    if (!gun.cartridge) return;
+    if (!gun.cartridge || this.options.isDisabled?.(gun.entity, gun.component)) return;
     const c = gun.cartridge, config = gun.component.data, p = this.physical.get(gun.part), body = gun.part.body;
     const node = gun.entity.metadata?.nodes.find(n => n.id === gun.part.metadata?.nodeId);
     const scale = node?.scale ?? { x: 1, y: 1 };

@@ -1,0 +1,90 @@
+{
+  "m_Name": "Unlit_SyringeShader",
+  "m_Shader": {
+    "m_FileID": 0,
+    "m_PathID": 865
+  },
+  "m_ShaderKeywords": "ETC1_EXTERNAL_ALPHA",
+  "m_LightmapFlags": 4,
+  "m_EnableInstancingVariants": true,
+  "m_DoubleSidedGI": false,
+  "m_CustomRenderQueue": -1,
+  "stringTagMap": [],
+  "disabledShaderPasses": [],
+  "m_SavedProperties": {
+    "m_TexEnvs": [
+      [
+        "_MainTex",
+        {
+          "m_Texture": {
+            "m_FileID": 0,
+            "m_PathID": 0
+          },
+          "m_Scale": {
+            "x": 1.0,
+            "y": 1.0
+          },
+          "m_Offset": {
+            "x": 0.0,
+            "y": 0.0
+          }
+        }
+      ]
+    ],
+    "m_Floats": [
+      [
+        "_ColorCutoff",
+        0.7222222089767456
+      ],
+      [
+        "_Cutoff",
+        0.2222222238779068
+      ],
+      [
+        "_CutoffA",
+        0.7222222089767456
+      ],
+      [
+        "_CutoffB",
+        0.1666666716337204
+      ],
+      [
+        "_Direction",
+        -1.0
+      ],
+      [
+        "_Intensity",
+        0.1111111119389534
+      ],
+      [
+        "_Speed",
+        15.0
+      ],
+      [
+        "_State",
+        0.36399999260902405
+      ]
+    ],
+    "m_Colors": [
+      [
+        "_LiquidColour",
+        {
+          "r": 0.0,
+          "g": 0.0,
+          "b": 0.0,
+          "a": 1.0
+        }
+      ],
+      [
+        "_Tint",
+        {
+          "r": 1.0,
+          "g": 1.0,
+          "b": 1.0,
+          "a": 1.0
+        }
+      ]
+    ]
+  },
+  "m_BuildTextureStacks": []
+}

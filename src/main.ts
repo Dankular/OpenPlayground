@@ -10,10 +10,16 @@ import { DeviceSystem } from './systems/devices';
 import { RagdollSystem } from './systems/ragdoll';
 import { WeaponSystem } from './systems/weapons';
 import { registerSystemState } from './state';
-import { GameAudio,loadAudioIndex } from './systems/audio';
+import { GameAudio,loadAudioIndex,resolveAudioReference } from './systems/audio';
 import { loadMapLibrary,mapSettings } from './maps';
 import { BodyShaderLibrary } from './shaders/body';
 import { EnvironmentSystem } from './systems/environment';
+import { LiquidSystem,PressureDirection } from './systems/liquids';
+import { LiquidEffects } from './systems/liquid-effects';
+import { SyringeContactSystem } from './systems/syringe-contact';
+import { SyringeBreakSystem } from './systems/syringe-break';
+import { DefibrillatorSystem } from './systems/defibrillator';
+import { MachinerySystem } from './systems/machinery';
 
 const icons: Record<string, string> = {
  human: '<circle cx="24" cy="9" r="5"/><path d="M19 17h10l2 15h-6v14h-4V32h-6z"/><path d="m17 19-5 15m19-15 5 15"/>',
@@ -38,15 +44,30 @@ const muteButton=document.createElement('button');muteButton.id='mute';muteButto
 const sim = new Simulation(rig,library);
 const physical=new PhysicalSystem();
 sim.onSpawn.push(e=>physical.attach(e));sim.onRemove.push(e=>physical.remove(e));sim.beforeStep.push(dt=>physical.beforeStep(dt));sim.afterStep.push(dt=>physical.afterStep(dt));
-const devices=new DeviceSystem(physical,{setRendererEnabled:(entity,id,enabled)=>view.setRendererEnabled(entity,id,enabled)});
+const machinery=new MachinerySystem(physical);sim.onSpawn.push(e=>machinery.attach(e));sim.onRemove.push(e=>machinery.remove(e));sim.beforeStep.push(()=>machinery.beforeStep());
+const disabled=(entity:Entity,component:import('./prefabs').SourceComponent)=>machinery.isDisabled(entity,component);
+const devices=new DeviceSystem(physical,{setRendererEnabled:(entity,id,enabled)=>view.setRendererEnabled(entity,id,enabled),isDisabled:disabled});
 sim.onSpawn.push(e=>devices.attach(e));sim.onRemove.push(e=>devices.remove(e));sim.beforeStep.push(dt=>devices.beforeStep(dt));
 const ragdolls=new RagdollSystem({getPhysical:part=>physical.get(part as Part)});
+const liquidEffects=new LiquidEffects(ragdolls,{getPhysical:part=>physical.get(part as Part)});
+const liquids=new LiquidSystem({effects:liquidEffects,getBlood:part=>ragdolls.limbFor(part)?.blood,setBlood:(part,amount)=>{const limb=ragdolls.limbFor(part);if(limb)limb.blood=amount;}});
+ragdolls.externalLiquidTransport=true;ragdolls.getTotalLiquid=part=>liquids.get(part as Part)?.total;
 const environment=new EnvironmentSystem(sim.world,{getPhysical:part=>physical.get(part),ragdolls,onSettings:settings=>{physical.ambientTemperature=settings.ambientTemperature;}});
-sim.onSpawn.push(e=>environment.attach(e),e=>ragdolls.attach(e));sim.onRemove.push(e=>environment.remove(e),e=>ragdolls.remove(e));sim.beforeStep.push(dt=>environment.beforeStep(dt),dt=>ragdolls.update(dt));sim.afterStep.push(dt=>ragdolls.afterStep(dt));
-const weapons=new WeaponSystem(sim,physical,{onHit:hit=>ragdolls.shot(hit.part,{damage:hit.damage,point:hit.point,normal:hit.normal,exit:hit.exit}),onFragment:(part,force)=>ragdolls.damage(part,force*1.5,'fragment'),onSlice:part=>ragdolls.slice(part),onTrace:trace=>view.addTracer(trace),onExplosion:(position,range)=>view.addExplosion(position,range),onShot:(e,c,first)=>{if(audioUnlocked)audio.firearm(e,c,first);}});
+sim.onSpawn.push(e=>environment.attach(e),e=>ragdolls.attach(e),e=>liquids.attach(e));sim.onRemove.push(e=>environment.remove(e),e=>liquidEffects.remove(e),e=>liquids.remove(e),e=>ragdolls.remove(e));sim.beforeStep.push(dt=>environment.beforeStep(dt),dt=>liquids.beforeStep(dt),dt=>ragdolls.update(dt));sim.afterStep.push(dt=>ragdolls.afterStep(dt));
+const needles=new SyringeContactSystem(sim,{isSyringe:part=>!!liquids.getSyringe(part),onLodged:(syringe,victim)=>{liquids.lodged(syringe,victim);},onDislodged:(syringe,victim)=>liquids.dislodged(syringe,victim)});
+sim.onSpawn.push(e=>needles.attach(e));sim.onRemove.unshift(e=>needles.remove(e));sim.beforeStep.push(dt=>needles.beforeStep(dt));sim.afterStep.push(dt=>needles.afterStep(dt));
+const syringeBreaks=new SyringeBreakSystem(sim,liquids,ragdolls);
+sim.onRemove.push(e=>syringeBreaks.remove(e));sim.beforeStep.push(dt=>syringeBreaks.beforeStep(dt));sim.afterStep.push(()=>syringeBreaks.afterStep());
+const defibrillators=new DefibrillatorSystem(physical,ragdolls,{isDisabled:disabled,playClip:(component,pointer,part)=>{if(audioUnlocked)audio.play(pointer,component.file??'sharedassets0.assets',{position:part.body.getPosition()});},clipDuration:(component,pointer)=>audio.index?resolveAudioReference(audio.index,component.file??'sharedassets0.assets',pointer)?.duration??1:1});
+sim.onSpawn.push(e=>defibrillators.attach(e));sim.onRemove.push(e=>defibrillators.remove(e));sim.beforeStep.push(dt=>defibrillators.beforeStep(dt));
+const weapons=new WeaponSystem(sim,physical,{isDisabled:disabled,onHit:hit=>{ragdolls.shot(hit.part,{damage:hit.damage,point:hit.point,normal:hit.normal,exit:hit.exit});if(!hit.exit)machinery.shot(hit.part,hit.damage);syringeBreaks.shot(hit.part,hit.exit);},onFragment:(part,force)=>{ragdolls.damage(part,force*1.5,'fragment');machinery.fragment(part,force);syringeBreaks.fragment(part);},onSlice:part=>{ragdolls.slice(part);machinery.slice(part);},onTrace:trace=>view.addTracer(trace),onExplosion:(position,range)=>view.addExplosion(position,range),onShot:(e,c,first)=>{if(audioUnlocked)audio.firearm(e,c,first);}});
 sim.onSpawn.push(e=>weapons.attach(e));sim.onRemove.push(e=>weapons.remove(e));sim.beforeStep.push(dt=>weapons.beforeStep(dt));
 registerSystemState(sim,physical,devices,ragdolls);sim.stateAdapters.set('weapons',{capture:e=>weapons.snapshot(e),restore:(e,value)=>weapons.restore(e,value)});
 sim.stateAdapters.set('environment',{capture:e=>environment.snapshot(e),restore:(e,value)=>environment.restore(e,value)});
+sim.stateAdapters.set('liquids',{capture:e=>liquids.snapshot(e),restore:(e,value)=>liquids.restore(e,value)});
+sim.stateAdapters.set('defibrillator',{capture:e=>defibrillators.snapshot(e),restore:(e,value)=>defibrillators.restore(e,value)});
+sim.stateAdapters.set('machinery',{capture:e=>machinery.snapshot(e),restore:(e,value)=>machinery.restore(e,value)});
+sim.sceneAdapters.set('syringeNeedles',{capture:entities=>needles.snapshot(entities),restore:(entities,value)=>needles.restore(entities,value)});
 sim.importTransactions.set('environment',{capture:()=>({...environment.settings}),rollback:value=>environment.applySettings(value as typeof environment.settings)});
 const enteringContacts=new Set<import('planck').Contact>();
 sim.world.on('begin-contact',contact=>enteringContacts.add(contact));sim.world.on('end-contact',contact=>enteringContacts.delete(contact));
@@ -54,6 +75,8 @@ sim.world.on('post-solve',(contact,impulse)=>{if(!enteringContacts.delete(contac
 const view = new SandboxRenderer($('#viewport'),sim,bodyShaders);
 view.physicalState=part=>physical.get(part)?.state;
 view.skinFor=part=>ragdolls.skinFor(part);view.skinTime=()=>ragdolls.time;
+view.syringeFor=part=>{const syringe=liquids.getSyringe(part);return syringe?{color:syringe.container.computedColor,scaledAmount:syringe.container.scaledAmount,pressureMode:syringe.container.pressureMode}:undefined;};
+view.rendererDisabled=(entity,renderer)=>{const component=entity.metadata?.nodes.find(n=>n.id===renderer.nodeId)?.components.find(c=>c.pathId===renderer.id);return !!renderer.nodeId&&machinery.nodeDisabled(entity,renderer.nodeId)||!!component&&machinery.isDisabled(entity,component);};
 const maps=await loadMapLibrary(library);
 let currentMapId:string|null=null;
 function resetCameraForMap(){
@@ -104,6 +127,11 @@ function choose(kind: string|null) {
 }
 function select(entity: Entity|null) {if(selected&&selected!==entity)weapons.setHeld(selected,false);selected=entity;renderSelection(); }
 const selectEntity=select;
+function useEntity(entity:Entity,channel=0){devices.use(entity,channel);weapons.use(entity);defibrillators.use(entity);liquids.use(entity,channel);if(selected===entity)renderSelection();}
+function liquidReadout(entity:Entity){
+  const mixture=new Map<string,number>();for(const part of entity.parts)for(const [id,value]of liquids.get(part)?.distribution??[])mixture.set(id,(mixture.get(id)??0)+value.amount);
+  return [...mixture].filter(([,amount])=>amount>1e-6).map(([id,amount])=>`${id.toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase())}: ${(amount*500/1.4).toFixed(1)} mL`).join(' · ')||'Empty';
+}
 function renderSelection() {
   const panel=$('#selection');panel.hidden=!selected;
   if (!selected) return;
@@ -113,7 +141,18 @@ function renderSelection() {
   $('#rotate').onclick=()=>sim.rotate(selected!,Math.PI/12);
   $('#delete').onclick=()=>{sim.remove(selected!);select(null);};
   if(states.length){$('#set-temperature').onchange=()=>physical.setTemperature(selected!,Number($<HTMLInputElement>('#set-temperature').value));$('#set-charge').onchange=()=>physical.setCharge(selected!,Number($<HTMLInputElement>('#set-charge').value));$('#ignite').onclick=()=>physical.ignite(selected!,true);$('#extinguish').onclick=()=>physical.extinguish(selected!);}
-  if(devices.get(selected).length||weapons.canUse(selected)){const button=document.createElement('button');button.id='activate';button.className='use-button';button.textContent='Use / activate (T)';button.onclick=()=>{devices.use(selected!);weapons.use(selected!);};panel.querySelector('div')!.prepend(button);}
+  if(devices.get(selected).length||weapons.canUse(selected)||defibrillators.canUse(selected)||liquids.syringesFor(selected).length){const button=document.createElement('button');button.id='activate';button.className='use-button';button.textContent='Use / activate (T)';button.onclick=()=>useEntity(selected!);panel.querySelector('div')!.prepend(button);}
+  const syringes=liquids.syringesFor(selected);
+  if(syringes.length){
+    const syringe=syringes[0],controls=document.createElement('section');controls.className='syringe-controls';
+    controls.innerHTML=`<label for="syringe-mode">Syringe mode</label><select id="syringe-mode" ${syringe.finite?'':'disabled'}><option value="0">Inject</option><option value="1">Extract</option><option value="2">Idle</option></select><label class="source-toggle"><input id="syringe-infinite" type="checkbox" ${syringe.finite?'':'checked'} ${syringe.canToggleInfinite?'':'disabled'}> Infinite source</label><span id="syringe-readout"></span><span id="needle-readout"></span><p>${syringe.finite?'Quickly insert the needle tip into a limb. Pull it back to remove.':'Infinite sources keep injecting. Disable infinite source to extract fluid.'}</p>`;
+    panel.querySelector('.selection-state')!.after(controls);$<HTMLSelectElement>('#syringe-mode').value=String(syringe.container.pressureMode);
+    $('#syringe-mode').onchange=()=>liquids.setMode(selected!,Number($<HTMLSelectElement>('#syringe-mode').value) as PressureDirection);
+    $('#syringe-infinite').onchange=()=>{liquids.setFinite(selected!,$<HTMLInputElement>('#syringe-infinite').checked===false);renderSelection();};
+  }
+  if(selected.parts.some(p=>liquids.get(p))){const readout=document.createElement('section');readout.className='liquid-readout';readout.id='liquid-readout';readout.textContent=liquidReadout(selected);panel.append(readout);}
+  if(defibrillators.canUse(selected)){const status=document.createElement('span');status.className='selection-state';status.id='defibrillator-readout';panel.append(status);}
+  if(machinery.get(selected).some(m=>m.canRepair)){const button=document.createElement('button');button.id='repair';button.textContent='Repair machinery';button.onclick=()=>{machinery.repair(selected!);renderSelection();};panel.append(button);}
   const person=ragdolls.stateFor(selected);
   if(person){const controls=document.createElement('section');controls.className='pose-controls';controls.innerHTML=`<label for="pose">Pose</label><select id="pose"><option value="-1">Automatic</option>${person.poses.map((p,i)=>`<option value="${i}">${escape(p.Name)}</option>`).join('')}</select><span class="selection-state" id="person-readout"></span><div class="body-mode-buttons"><button id="heal-person">Heal</button><button id="damage-person">Injure</button></div>`;panel.append(controls);$<HTMLSelectElement>('#pose').value=String(person.overridePoseIndex);$('#pose').onchange=()=>ragdolls.setPose(selected!,Number($<HTMLSelectElement>('#pose').value));$('#heal-person').onclick=()=>person.limbs.forEach(l=>ragdolls.heal(l.part,l.initialHealth));$('#damage-person').onclick=()=>{if(person.head)ragdolls.damage(person.head.part,10);};}
 }
@@ -174,7 +213,7 @@ window.addEventListener('keydown',e=>{
   if(['1','2','3','4'].includes(e.key)){const target=library?['Human','Crate','Bowling Ball','Wooden Pole'][Number(e.key)-1]:CATALOG[Number(e.key)-1].name;const item=items.find(i=>i.name===target);if(item)choose(item.id);}
   if(e.key==='Delete'&&selected){sim.remove(selected);select(null);}
   if(e.key.toLowerCase()==='f'&&selected&&!e.repeat){sim.freeze(selected);renderSelection();}
-  if(e.key.toLowerCase()==='t'&&selected&&!e.repeat){devices.use(selected,e.shiftKey?1:0);weapons.use(selected);weapons.setHeld(selected,true);}
+  if(e.key.toLowerCase()==='t'&&selected&&!e.repeat){useEntity(selected,e.shiftKey?1:e.altKey?2:0);weapons.setHeld(selected,true);}
   if(['q','e'].includes(e.key.toLowerCase())&&selected)sim.rotate(selected,(e.key.toLowerCase()==='q'?-1:1)*Math.PI/12);
   if(e.key==='.'){if(!sim.paused)togglePause();sim.step();}
   if(e.key==='Home')resetCameraForMap();
@@ -191,7 +230,7 @@ function animate(now:number){
   audio.camera={x:view.center.x,y:view.center.y,width:view.viewHeight*$('#viewport').clientWidth/Math.max(1,$('#viewport').clientHeight)};
   audio.setTimeScale(sim.paused?0:sim.speed);
   const scaled=sim.paused?0:Math.min(dt,.1)*sim.speed;
-  if(!sim.paused){physical.frame(scaled,sim.speed);devices.frame(scaled);environment.frame(scaled);}
+  if(!sim.paused){physical.frame(scaled,sim.speed);devices.frame(scaled);environment.frame(scaled);liquids.frame(scaled);}
   sim.update(dt);view.updateEffects(scaled);
   if(selected&&!sim.entities.includes(selected))select(null);
   view.render(selected);
@@ -202,6 +241,10 @@ function animate(now:number){
     if(readout&&selected){const states=selected.parts.map(p=>physical.get(p)).filter(p=>p!==undefined);readout.textContent=`${(states.reduce((a,s)=>a+s.state.temperature,0)/states.length).toFixed(1)} °C · ${(states.reduce((a,s)=>a+s.state.charge,0)/states.length).toFixed(1)} charge${states.some(s=>s.state.onFire)?' · Burning':''}`;}
     const personReadout=document.querySelector('#person-readout');
     if(personReadout&&selected){const person=ragdolls.stateFor(selected);if(person)personReadout.textContent=`Consciousness ${Math.round(person.consciousness*100)}% · Oxygen ${Math.round(person.oxygen*100)}%`;}
+    const fluidReadout=document.querySelector('#liquid-readout');if(fluidReadout&&selected)fluidReadout.textContent=liquidReadout(selected);
+    const syringeReadout=document.querySelector('#syringe-readout');if(syringeReadout&&selected){const syringe=liquids.syringesFor(selected)[0];if(syringe)syringeReadout.textContent=`${Math.round(syringe.container.scaledAmount*100)}% full · ${(syringe.container.total*500/1.4).toFixed(1)} mL`;}
+    const needleReadout=document.querySelector('#needle-readout');if(needleReadout&&selected){const connection=selected.parts.map(p=>needles.get(p)).find(c=>!!c);needleReadout.textContent=connection?`Needle inserted in ${connection.victim.label}`:'Needle not inserted';}
+    const defibReadout=document.querySelector('#defibrillator-readout');if(defibReadout&&selected){const state=defibrillators.get(selected)[0];defibReadout.textContent=state?.phase==='standby'?`Stand clear… ${state.remaining.toFixed(1)} s`:state?.phase==='clear'?'Discharging':'Defibrillator ready';}
   }
   requestAnimationFrame(animate);
 }

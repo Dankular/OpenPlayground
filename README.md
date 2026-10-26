@@ -8,7 +8,10 @@ child sprites. Without local assets, a small procedural sandbox is available.
 
 Implemented systems include active Human/Android/Gorse ragdolls and poses, a
 physiology and injury model, temperature and electricity, combustion, several
-machinery controllers, firearm ballistics and timed explosives. Original gunshot
+machinery controllers, firearm ballistics and timed explosives. Syringes carry
+source mixtures, support finite push/pull and infinite-source modes, inject while
+their needle is lodged, and apply serum/poison effects through circulation.
+Broken nonempty syringes also dose nearby organic limbs. Original gunshot
 and material-impact audio loads on demand. Controls include grabbing/throwing,
 freeze/delete/rotate, pause/step, slow motion, camera navigation and scene saves.
 
@@ -81,6 +84,7 @@ hash-verified exports when rerunning the full extractor. The smaller
 | Freeze / delete selection | F / Delete |
 | Activate / fire selected object | T; hold for supported automatic firearms |
 | Temperature, charge, fire and pose | Selected-object panel |
+| Syringe pressure / infinite source | Selected-syringe controls; T cycles push/pull |
 | Rotate selection | Q / E, in 15° increments |
 | Reset camera | Home |
 | Find an object | / |
@@ -92,16 +96,23 @@ REA MCP established assembly identity and inspected selected core methods and
 fields. Focused ILSpy reconstruction and UnityPy asset parsing supplied additional
 evidence. See [research/FINDINGS.md](research/FINDINGS.md) for provenance, evidence
 IDs, recovered parameters, approximations and remaining work. Further details:
-[ragdolls](research/RAGDOLL.md), [physical systems](research/PHYSICAL.md).
+[ragdolls](research/RAGDOLL.md), [physical systems](research/PHYSICAL.md),
+[environment](research/ENVIRONMENT.md), [liquids and syringes](research/LIQUIDS.md).
+See the [runtime gap inventory](research/FEATURE-GAPS.md) and
+[machinery/defibrillator notes](research/MACHINERY.md) for current repair scope.
 `scripts/rewrite_coverage.py` writes an explicit incomplete-behavior ledger to
 `research/local/rewrite-coverage.json`.
 
 The browser uses an orthographic camera and a 0.02-second fixed physics step.
 Planck joints, collision filtering and rendering are adaptations; using original
 prefab values does not establish identical Unity behavior. Native contraption and
-mod compatibility, most specialized machinery, liquids and many audiovisual
-effects remain separate work. Browser JSON saves include source build identity,
+mod compatibility, most specialized machinery, advanced chemistry/device
+interactions and many audiovisual effects remain separate work. Source liquid
+transport and the implemented serum/poison effects have their own documented
+limits. Browser JSON saves include source build identity,
 body/joint identity and implemented system state; legacy browser saves remain
 loadable. They are not native game contraption files.
 
-The original installation and generated extracted files are not committed.
+The original installation and generated extraction archive are not committed.
+The focused syringe shader/material sources used by the browser adapter are
+included under `src/shaders/source` so production builds are reproducible.

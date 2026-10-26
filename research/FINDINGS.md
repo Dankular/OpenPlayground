@@ -60,7 +60,13 @@ parity. The full catalogue uses 238 distinct MonoBehaviour classes, with many
 unassigned reconstruction obligations. Run scripts/rewrite_coverage.py to regenerate
 the explicit incomplete ledger at research/local/rewrite-coverage.json.
 
-Further work includes remaining specialized scripts, mixed liquids, wires and
+The medical repair pass adds mixed-liquid reservoirs, syringe pressure modes,
+needle lodging/extraction, serum/poison effects and permanent-stat persistence.
+Shared machinery damage/repair and delayed pad-local defibrillation are also
+implemented. See LIQUIDS.md, LIQUID_EFFECTS.md and MACHINERY.md for source anchors,
+tests and remaining boundaries. These additions do not establish native parity.
+
+Further work includes remaining specialized scripts, advanced liquid devices, wires and
 activation propagation, vehicle controls, map/environment systems, particles and
 compiled shaders, native contraption format, mods, menus/settings, platform
 integrations and native runtime comparisons. Browser JSON saves are a new format;

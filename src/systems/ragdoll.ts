@@ -22,7 +22,7 @@ export interface ShotInput {damage:number;point:{x:number;y:number};normal:{x:nu
 export interface RagdollSnapshot {
   version:1;
   person:{consciousness:number;oxygen:number;shock:number;pain:number;adrenaline:number;brainDead:boolean;brainDamaged:boolean;brainDamagedTime:number;seizureTime:number;desiredWalkingDirection:number;overridePoseIndex:number;time:number};
-  limbs:{id:string;health:number;numbness:number;broken:boolean;frozen:boolean;internalTemperature:number;blood:number;bloodFlow:number;bleedingRate:number;internalBleeding:number;isPump:boolean;lungsPunctured:boolean;dismembered:boolean;jointStress:number;acidProgress:number;rottenProgress:number;wounds?:SkinWound[]}[];
+  limbs:{id:string;health:number;initialHealth?:number;numbness:number;broken:boolean;frozen:boolean;internalTemperature:number;blood:number;bloodFlow:number;bleedingRate:number;internalBleeding:number;isPump:boolean;wasInitiallyPumping?:boolean;lungsPunctured:boolean;dismembered:boolean;jointStress:number;acidProgress:number;rottenProgress:number;wounds?:SkinWound[];modifiers?:Record<string,number|boolean>;skinIntensityMultiplier?:number;bloodLossRateMultiplier?:number}[];
 }
 export interface CurveKey { time: number; value: number; inSlope?: number; outSlope?: number; weightedMode?: number; inWeight?: number; outWeight?: number }
 export interface SerializedCurve { m_Curve?: CurveKey[]; m_PreInfinity?: number; m_PostInfinity?: number }
@@ -69,6 +69,8 @@ const flag = (data: Data, key: string) => data[key] === true || data[key] === 1;
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const id = (value: unknown) => { const data = record(value); return String(data.m_PathID ?? value ?? ''); };
 const deltaDegrees = (from: number, to: number) => ((to - from) % 360 + 540) % 360 - 180;
+const modifierNumbers=['Vitality','RegenerationSpeed','ImpactPainMultiplier','BreakingThreshold','BaseStrength','ShotDamageMultiplier','BloodMuscleStrengthRatio','BalanceMuscleMovement'];
+const modifierFlags=['IsZombie','HasLungs','DoBalanceJerk','DoStumble'];
 
 /** Cubic Hermite interpolation for the unweighted keys found in shipped poses.
  * Serialized infinity 0 is adapted as ping-pong for the game's cyclic pose data;
@@ -117,6 +119,9 @@ function dataFor(list: Data[], className: string, field: string): { component: D
 export class RagdollSystem {
   readonly people = new Map<number, PersonState>();
   time = 0;
+  /** Mixed-liquid reservoirs own transport when attached; physiology still owns wounds/regeneration. */
+  externalLiquidTransport = false;
+  getTotalLiquid?: (part:RagdollPart)=>number|undefined;
   private limbByPart = new WeakMap<RagdollPart, LimbState>();
   private options: RagdollOptions;
   constructor(options: RagdollOptions = {}) { this.options = options; }
@@ -134,7 +139,7 @@ export class RagdollSystem {
     const allComponents = [...nodes.flatMap(components), ...array(metadata.rootComponents).map(record)];
     const personComponent = dataFor(allComponents, 'PersonBehaviour', 'Poses');
     if (!personComponent) return undefined;
-    const config = personComponent.data;
+    const config = {...personComponent.data};
     const poses = array(config.Poses).filter(x => typeof record(x).Name === 'string' && Array.isArray(record(x).Angles)) as unknown as RagdollPose[];
     const person: PersonState = {
       entity, config, limbs: [], poses, overridePoseIndex: num(config, 'OverridePoseIndex', -1),
@@ -152,13 +157,14 @@ export class RagdollSystem {
       const list = [...components(meta), ...components(node)];
       const entry = dataFor(list,'LimbBehaviour','BaseStrength');
       if (!entry) continue;
-      const d = entry.data, c = dataFor(list,'CirculationBehaviour','BloodRegenerationPerSecond'), connected = dataFor(list,'ConnectedNodeBehaviour','IsRoot'), skin = dataFor(list,'SkinMaterialHandler','rottenProgress');
+      // Runtime serum modifiers must not mutate the shared extracted prefab.
+      const d = {...entry.data}, c = dataFor(list,'CirculationBehaviour','BloodRegenerationPerSecond'), connected = dataFor(list,'ConnectedNodeBehaviour','IsRoot'), skin = dataFor(list,'SkinMaterialHandler','rottenProgress');
       const health = num(d,'Health',50), bodyTemp=num(d,'BodyTemperature',37);
       const jointId = id(d.Joint);
       let joint = entity.jointById?.get(jointId);
       if (!(joint instanceof RevoluteJoint)) joint = entity.joints.find(j => j instanceof RevoluteJoint && j.getBodyA() === part.body);
       const limb: LimbState = {
-        id:String(entry.component.pathId ?? part.id ?? person.limbs.length), part, config:d, circulation:c?.data??{}, node:connected?.data??{}, skin:skin?.data??{},
+        id:String(entry.component.pathId ?? part.id ?? person.limbs.length), part, config:d, circulation:{...c?.data}, node:connected?.data??{}, skin:{...skin?.data},
         health, initialHealth:health, numbness:num(d,'Numbness'),broken:flag(d,'Broken'),frozen:flag(d,'Frozen'),connected:true,isOnFloor:false,
         internalTemperature:bodyTemp,blood:1,bloodFlow:1,bleedingRate:num(c?.data??{},'BleedingRate'), internalBleeding:num(c?.data??{},'InternalBleedingIntensity'),
         isPump:flag(c?.data??{},'IsPump'),wasInitiallyPumping:flag(c?.data??{},'IsPump'),lungsPunctured:flag(d,'LungsPunctured'),dismembered:flag(d,'IsDismembered'),
@@ -201,7 +207,7 @@ export class RagdollSystem {
   private nativePoint(limb:LimbState,worldPoint:{x:number;y:number}){const local=limb.part.body.getLocalPoint(worldPoint);return{x:local.x/(limb.localScale.x||1),y:local.y/(limb.localScale.y||1)};}
   snapshot(entity:RagdollEntity):RagdollSnapshot|undefined {
     const p=this.stateFor(entity);if(!p)return undefined;
-    return{version:1,person:{consciousness:p.consciousness,oxygen:p.oxygen,shock:p.shock,pain:p.pain,adrenaline:p.adrenaline,brainDead:p.brainDead,brainDamaged:p.brainDamaged,brainDamagedTime:p.brainDamagedTime,seizureTime:p.seizureTime,desiredWalkingDirection:p.desiredWalkingDirection,overridePoseIndex:p.overridePoseIndex,time:p.time},limbs:p.limbs.map(l=>({id:l.id,health:l.health,numbness:l.numbness,broken:l.broken,frozen:l.frozen,internalTemperature:l.internalTemperature,blood:l.blood,bloodFlow:l.bloodFlow,bleedingRate:l.bleedingRate,internalBleeding:l.internalBleeding,isPump:l.isPump,lungsPunctured:l.lungsPunctured,dismembered:l.dismembered,jointStress:l.jointStress,acidProgress:l.acidProgress,rottenProgress:l.rottenProgress,wounds:l.skinVisual.wounds.map(w=>({...w}))}))};
+    return{version:1,person:{consciousness:p.consciousness,oxygen:p.oxygen,shock:p.shock,pain:p.pain,adrenaline:p.adrenaline,brainDead:p.brainDead,brainDamaged:p.brainDamaged,brainDamagedTime:p.brainDamagedTime,seizureTime:p.seizureTime,desiredWalkingDirection:p.desiredWalkingDirection,overridePoseIndex:p.overridePoseIndex,time:p.time},limbs:p.limbs.map(l=>({id:l.id,health:l.health,initialHealth:l.initialHealth,numbness:l.numbness,broken:l.broken,frozen:l.frozen,internalTemperature:l.internalTemperature,blood:l.blood,bloodFlow:l.bloodFlow,bleedingRate:l.bleedingRate,internalBleeding:l.internalBleeding,isPump:l.isPump,wasInitiallyPumping:l.wasInitiallyPumping,lungsPunctured:l.lungsPunctured,dismembered:l.dismembered,jointStress:l.jointStress,acidProgress:l.acidProgress,rottenProgress:l.rottenProgress,wounds:l.skinVisual.wounds.map(w=>({...w})),modifiers:Object.fromEntries([...modifierNumbers.filter(k=>typeof l.config[k]==='number').map(k=>[k,l.config[k] as number]),...modifierFlags.map(k=>[k,flag(l.config,k)])]),skinIntensityMultiplier:num(l.skin,'intensityMultiplier',1),bloodLossRateMultiplier:num(l.circulation,'BloodLossRateMultiplier',1)}))};
   }
   restore(entity:RagdollEntity,value:unknown):boolean {
     const p=this.stateFor(entity),data=record(value),person=record(data.person),limbs=array(data.limbs).map(record);
@@ -213,13 +219,24 @@ export class RagdollSystem {
     const boolean=(d:Data,keys:string[])=>keys.every(k=>typeof d[k]==='boolean');
     const ids=new Set(limbs.map(l=>l.id));
     if(ids.size!==p.limbs.length||!finite(person,personNumbers)||!boolean(person,personFlags)||limbs.some(l=>!p.limbs.some(x=>x.id===l.id)||!finite(l,limbNumbers)||!boolean(l,limbFlags)))return false;
-    for(const l of limbs)if(num(l,'blood')<0||num(l,'blood')>1||num(l,'bloodFlow')<0||num(l,'bloodFlow')>1||num(l,'health')<0)return false;
+    for(const l of limbs)if(num(l,'blood')<0||num(l,'bloodFlow')<0||num(l,'bloodFlow')>1||num(l,'health')<0)return false;
+    for(const l of limbs){
+      if(l.initialHealth!==undefined&&(typeof l.initialHealth!=='number'||!Number.isFinite(l.initialHealth)||l.initialHealth<=0))return false;
+      if(l.wasInitiallyPumping!==undefined&&typeof l.wasInitiallyPumping!=='boolean')return false;
+      if(['skinIntensityMultiplier','bloodLossRateMultiplier'].some(k=>l[k]!==undefined&&(typeof l[k]!=='number'||!Number.isFinite(l[k]))))return false;
+      if(l.modifiers!==undefined&&Object.entries(record(l.modifiers)).some(([k,v])=>modifierNumbers.includes(k)?typeof v!=='number'||!Number.isFinite(v):modifierFlags.includes(k)?typeof v!=='boolean':true))return false;
+    }
     for(const l of limbs)if(l.wounds!==undefined&&(!Array.isArray(l.wounds)||l.wounds.length>128||array(l.wounds).some(value=>{const w=record(value);return!finite(w,['x','y','intensity','type','time'])||!Number.isInteger(w.type)||num(w,'type')<0||num(w,'type')>5||num(w,'intensity')<0;})))return false;
     for(const limb of p.limbs){
       const saved=limbs.find(l=>l.id===limb.id)!;
       if(saved.dismembered&&!limb.dismembered)this.slice(limb.part);
       if(saved.broken&&!limb.broken)this.breakBone(limb.part);else if(!saved.broken&&limb.broken)this.healBone(limb.part);
       for(const key of [...limbNumbers,...limbFlags])Object.assign(limb,{[key]:saved[key]});
+      if(saved.initialHealth!==undefined)limb.initialHealth=saved.initialHealth as number;
+      if(saved.wasInitiallyPumping!==undefined)limb.wasInitiallyPumping=saved.wasInitiallyPumping as boolean;
+      for(const[k,v]of Object.entries(record(saved.modifiers)))limb.config[k]=v;
+      if(saved.skinIntensityMultiplier!==undefined)limb.skin.intensityMultiplier=saved.skinIntensityMultiplier;
+      if(saved.bloodLossRateMultiplier!==undefined)limb.circulation.BloodLossRateMultiplier=saved.bloodLossRateMultiplier;
       limb.skinVisual.rottenProgress=limb.rottenProgress;limb.skinVisual.acidProgress=limb.acidProgress;
       limb.skinVisual.wounds=array(saved.wounds).map(value=>{const w=record(value);return{x:num(w,'x'),y:num(w,'y'),intensity:num(w,'intensity'),type:num(w,'type'),time:num(w,'time')};});
     }
@@ -233,6 +250,10 @@ export class RagdollSystem {
     this.options.onDamage?.(limb,amount,kind);
   }
   heal(part: RagdollPart, amount: number) {const limb=this.limbByPart.get(part);if(limb&&Number.isFinite(amount)&&amount>0)limb.health=Math.min(limb.initialHealth,limb.health+amount);}
+  healBleeding(part:RagdollPart){const limb=this.limbByPart.get(part);if(limb){limb.bleedingRate=0;limb.internalBleeding=0;}}
+  influenceMotorSpeed(part:RagdollPart,speedDegrees:number,influence=.5){const limb=this.limbByPart.get(part);if(limb)this.influence(limb,speedDegrees,influence);}
+  winceLimb(part:RagdollPart,intensity=1){const limb=this.limbByPart.get(part);if(limb?.joint&&limb.connected&&limb.health>=.1)this.influence(limb,clamp(60*intensity*(this.noise(limb.randomOffset,limb.person.time*8)*2-1),-450,450));}
+  wincePerson(part:RagdollPart,intensity=150){const limb=this.limbByPart.get(part);if(limb)this.wince(limb.person,intensity);}
   private inBounds(limb:LimbState,point:{x:number;y:number},bounds:unknown) {
     const local=this.nativePoint(limb,point),distance=4/35;
     return array(bounds).some(value=>{const b=record(value),center=record(b.m_Center),extent=record(b.m_Extent);return Math.max(0,Math.abs(local.x-num(center,'x'))-num(extent,'x'))**2+Math.max(0,Math.abs(local.y-num(center,'y'))-num(extent,'y'))**2<=distance**2;});
@@ -376,14 +397,15 @@ export class RagdollSystem {
       const charge=physical?.charge??0;
       if(limb.isPump&&charge>.5&&this.random()>.995-charge/500)limb.isPump=false;
       else if(!limb.isPump&&limb.wasInitiallyPumping&&this.random()>.999&&charge>.001&&limb.bloodFlow<.1)limb.isPump=true;
-      limb.bloodFlow=clamp(limb.isPump&&limb.connected&&!person.brainDead?limb.blood:limb.bloodFlow-dt/20,0,limb.blood);
+      const total=Math.max(0,this.getTotalLiquid?.(limb.part)??limb.blood);
+      limb.bloodFlow=clamp(limb.isPump&&limb.connected&&!person.brainDead?total:limb.bloodFlow-dt/20,0,Math.min(1,total));
       if(limb.bleedingRate>.05&&(physical?.temperature??37)>0){if(limb.bleedingRate<1)limb.bleedingRate=Math.max(0,limb.bleedingRate-dt*.05);limb.blood=Math.max(0,limb.blood-dt/lerp(60,20,limb.bloodFlow)*limb.bleedingRate*.15);}
       limb.internalBleeding=Math.max(0,limb.internalBleeding-dt*.01);
       if(!limb.dismembered&&limb.bleedingRate<1&&limb.health>.1&&limb.blood<1)limb.blood=clamp(limb.blood+num(limb.circulation,'BloodRegenerationPerSecond',.0025)*dt);
       for(const target of limb.pushesTo)if(target.connected&&limb.connected&&!target.dismembered&&target.bloodFlow<limb.bloodFlow)target.bloodFlow=lerp(target.bloodFlow,limb.bloodFlow,.5);
       // Preserve the shipped transfer sequence, including target AddLiquid clamping.
       const neighbors=limb.diffuseOscillator?limb.connectedLimbs:[...limb.connectedLimbs].reverse();
-      for(const target of neighbors)if(target.connected&&limb.connected&&target.blood<=limb.blood){const amount=Math.min(dt*1.5,limb.blood);limb.blood-=amount;target.blood=clamp(target.blood+amount);}
+      if(!this.externalLiquidTransport)for(const target of neighbors)if(target.connected&&limb.connected&&target.blood<=limb.blood){const amount=Math.min(dt*1.5,limb.blood);limb.blood-=amount;target.blood=clamp(target.blood+amount);}
       limb.diffuseOscillator=!limb.diffuseOscillator;
     }
   }

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { type Entity, type Part, Simulation } from './simulation';
 import { BodyShaderLibrary,updateBodyMaterial,type BodySprite } from './shaders/body';
 import type { SkinUniforms } from './systems/skin';
+import type {PrefabRenderer} from './prefabs';
+import {SyringeShaderLibrary,updateSyringeMaterial,type SyringeVisualState} from './shaders/syringe';
 
 export class SandboxRenderer {
   scene = new THREE.Scene();
@@ -16,12 +18,16 @@ export class SandboxRenderer {
   physicalState?: (part:Part)=>{temperature:number;burnProgress:number;onFire:boolean}|undefined;
   skinFor?: (part:Part)=>SkinUniforms|undefined;
   skinTime?: ()=>number;
+  rendererDisabled?: (entity:Entity,renderer:PrefabRenderer)=>boolean;
+  syringeFor?: (part:Part)=>SyringeVisualState|undefined;
+  private syringeShaders:SyringeShaderLibrary;
   private textureLoader = new THREE.TextureLoader();
   private textures = new Map<string, THREE.Texture>();
   private resizeObserver: ResizeObserver;
   private selection = new THREE.Box3Helper(new THREE.Box3(), 0x9dda7a);
   private fallbackObjects: THREE.Object3D[]=[];
   constructor(readonly container: HTMLElement, readonly simulation: Simulation, readonly bodyShaders:BodyShaderLibrary|null=null) {
+    this.syringeShaders=new SyringeShaderLibrary(bodyShaders?.projectColorSpace!==0);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x20252b);
@@ -155,17 +161,18 @@ export class SandboxRenderer {
       for(const r of e.renderers??[]){
         if(!r.sprite)continue;
         const node=e.metadata?.nodes.find(n=>n.id===r.nodeId);
-        let g=groups.get(r.id);const active=node?.active!==false;const enabled=this.rendererOverrides.get(e)?.get(r.id)??(r.enabled!==false&&active);if(!enabled){if(g)g.visible=false;continue;}
+        let g=groups.get(r.id);const active=node?.active!==false;const enabled=(this.rendererOverrides.get(e)?.get(r.id)??(r.enabled!==false&&active))&&!this.rendererDisabled?.(e,r);if(!enabled){if(g)g.visible=false;continue;}
         if(!g){
           const source=node?.components.find(c=>c.type==='SpriteRenderer');
           const pointer=(source?.data.m_Materials as {m_FileID:number;m_PathID:number}[]|undefined)?.[0];
-          const material=pointer?.m_FileID===0?this.bodyShaders?.create({materialKey:`${source?.file??'sharedassets0.assets'}:${pointer.m_PathID}`,sprite:r.sprite as BodySprite,nativeScale:node?.scale,bodyOffset:r.position})??null:null;
+          const part=e.parts.find(p=>p.id===r.bodyId);
+          const material=part&&this.syringeFor?.(part)?this.syringeShaders.create(r.sprite as BodySprite):pointer?.m_FileID===0?this.bodyShaders?.create({materialKey:`${source?.file??'sharedassets0.assets'}:${pointer.m_PathID}`,sprite:r.sprite as BodySprite,nativeScale:node?.scale,bodyOffset:r.position})??null:null;
           g=new THREE.Group();g.add(this.spriteMesh(r.sprite,material));groups.set(r.id,g);this.scene.add(g);
         }
         g.visible=true;
         const part=e.parts.find(p=>p.id===r.bodyId),body=part?.body;
         const state=part?this.physicalState?.(part):undefined;
-        g.traverse(child=>{if(child instanceof THREE.Mesh){const m=child.material as THREE.Material;if(m.userData.nativeBodyShader){updateBodyMaterial(m,part?this.skinFor?.(part):undefined,this.skinTime?.()??0);}else if(state&&m instanceof THREE.MeshBasicMaterial&&m.userData.sourceColor){m.color.copy(m.userData.sourceColor).multiplyScalar(1-.8*THREE.MathUtils.clamp(state.burnProgress,0,1));const glow=THREE.MathUtils.clamp((state.temperature-300)/1200,0,.75);if(glow>0)m.color.lerp(new THREE.Color(0xff6b2c),glow);}}});
+        g.traverse(child=>{if(child instanceof THREE.Mesh){const m=child.material as THREE.Material;if(m.userData.nativeBodyShader){updateBodyMaterial(m,part?this.skinFor?.(part):undefined,this.skinTime?.()??0);}else if(m.userData.nativeSyringeShader){updateSyringeMaterial(m,part?this.syringeFor?.(part):undefined,this.skinTime?.()??0);}else if(state&&m instanceof THREE.MeshBasicMaterial&&m.userData.sourceColor){m.color.copy(m.userData.sourceColor).multiplyScalar(1-.8*THREE.MathUtils.clamp(state.burnProgress,0,1));const glow=THREE.MathUtils.clamp((state.temperature-300)/1200,0,.75);if(glow>0)m.color.lerp(new THREE.Color(0xff6b2c),glow);}}});
         const root=body?.getPosition()??e.position??{x:0,y:0};const a=body?.getAngle()??e.angle??0;
         g.position.set(root.x+r.position.x*Math.cos(a)-r.position.y*Math.sin(a),root.y+r.position.x*Math.sin(a)+r.position.y*Math.cos(a),.05);g.rotation.z=a+r.angle;
         if(e===selected){g.updateMatrixWorld(true);bounds.expandByObject(g);}
