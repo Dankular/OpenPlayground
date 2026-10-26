@@ -20,6 +20,20 @@ function fixture() {
 }
 
 describe('reconstructed ragdoll behavior',()=>{
+  it('applies native StunImpact charge/pain before delayed organic numbness and blackout',()=>{
+    const{system,parts,state,physical}=fixture();system.stunImpact(parts[0]);
+    expect(physical.get(parts[0])!.state.charge).toBe(1);expect(state.pain).toBe(150);expect(state.consciousness).toBe(1);
+    system.update(.2);expect(system.limbFor(parts[0])!.numbness).toBeLessThan(1);system.update(.21);expect(system.limbFor(parts[0])!.numbness).toBe(1);expect(state.consciousness).toBe(0);
+  });
+  it('gives Android stun charge10 without organic knockout or delay',()=>{
+    const{system,parts,state,physical}=fixture();system.limbFor(parts[0])!.config.IsAndroid=true;system.stunImpact(parts[0]);
+    expect(physical.get(parts[0])!.state.charge).toBe(10);expect(state.pain).toBe(0);expect(system.snapshot(state.entity)?.stuns).toEqual([]);
+  });
+  it('restores remaining stun delay without replaying charge or pain',()=>{
+    const{system,parts,state,entity,physical}=fixture();system.stunImpact(parts[0]);system.update(.1);const saved=system.snapshot(entity)!;
+    expect(saved.stuns?.[0].delays[0]).toBeCloseTo(.3);system.update(.4);expect(system.restore(entity,saved)).toBe(true);system.update(.2);expect(system.limbFor(parts[0])!.numbness).toBeLessThan(1);system.update(.11);expect(state.consciousness).toBe(0);
+    expect(physical.get(parts[0])!.state.charge).toBe(1);
+  });
   it('drives a displaced hinge toward its serialized rest pose',()=>{
     const {parts,system,state,joint}=fixture();
     parts[0].body.setAngle(.5);system.update(.02);

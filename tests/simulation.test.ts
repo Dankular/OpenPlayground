@@ -41,6 +41,14 @@ describe('sandbox physics', () => {
     expect(()=>sim.import(data)).toThrow('Invalid scene coordinates');expect(sim.entities).toHaveLength(1);
     expect(()=>sim.import({format:'open-playground',version:1,entities:[{kind:'human',frozen:false,parts:[]}]})).toThrow('Invalid scene object');
   });
+  it('preserves custom mass and stored motion through frozen save/load',()=>{
+    const sim=new Simulation(),entity=sim.spawn('box',0,4),part=entity.parts[0];
+    part.body.setMassData({mass:7,center:{x:.1,y:-.05},I:3.2});part.body.setLinearVelocity({x:3,y:4});part.body.setAngularVelocity(2);
+    sim.freeze(entity);expect(part.body.getMass()).toBe(0);expect(sim.massFor(part)).toBe(7);
+    const restored=new Simulation();restored.import(JSON.parse(JSON.stringify(sim.serialize())));
+    const loaded=restored.entities[0],body=loaded.parts[0].body;expect(restored.massFor(loaded.parts[0])).toBe(7);restored.freeze(loaded);
+    const mass={mass:0,center:{x:0,y:0},I:0};body.getMassData(mass);expect(mass.mass).toBe(7);expect(mass.I).toBeCloseTo(3.2);expect(mass.center).toEqual({x:.1,y:-.05});expect(body.getLinearVelocity()).toEqual({x:3,y:4});expect(body.getAngularVelocity()).toBe(2);
+  });
   it('destroys connected joints and active grab when an entity is removed', () => {
     const sim=new Simulation();const human=sim.spawn('human',0,0);sim.beginDrag(human.parts[0],0,1);expect(sim.drag).not.toBeNull();sim.remove(human);
     expect(sim.entities).toHaveLength(0);expect(sim.drag).toBeNull();expect(sim.world.getJointCount()).toBe(0);

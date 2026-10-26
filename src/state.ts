@@ -3,6 +3,14 @@ import type { PhysicalSystem } from './systems/physical-world';
 import type { DeviceSystem } from './systems/devices';
 import type { RagdollSystem } from './systems/ragdoll';
 import type { PhysicalState } from './systems/physical';
+import type { WireSystem } from './systems/wires';
+
+export function registerConnectionState(sim:Simulation,wires:WireSystem){
+  sim.sceneAdapters.set('connections',{capture:entities=>wires.snapshot(entities),restore:(entities,value)=>{
+    const previous=new Set(wires.wires.keys());if(!wires.restore(value,entities))return false;
+    return ()=>{for(const wire of [...wires.wires.values()])if(!previous.has(wire.id))wires.disconnect(wire);};
+  }});
+}
 
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
 const finite=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)&&Math.abs(value)<=1e12;

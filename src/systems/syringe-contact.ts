@@ -26,6 +26,7 @@ export class SyringeContactSystem {
   }
   attach(entity:Entity){for(const part of entity.parts)this.owners.set(part.body,{part,entity});}
   remove(entity:Entity){for(const connection of [...this.connections.values()])if(connection.owner===entity||connection.target===entity)this.dislodge(connection.syringe);for(const p of entity.parts){this.pending.delete(p);this.owners.delete(p.body);}}
+  removeParts(parts:readonly Part[]){for(const connection of [...this.connections.values()])if(parts.includes(connection.syringe)||parts.includes(connection.victim))this.dislodge(connection.syringe);for(const part of parts){this.pending.delete(part);this.owners.delete(part.body);}}
   get(part:Part):NeedleConnection|undefined{return this.connections.get(part);}
   all():readonly NeedleConnection[]{return [...this.connections.values()];}
   private axes(part:Part):SharpAxis[]{const value=properties(part).SharpAxes;return Array.isArray(value)?value.filter(a=>a&&typeof a==='object'&&a.Axis&&Number.isFinite(a.Axis.x)&&Number.isFinite(a.Axis.y)&&Math.hypot(a.Axis.x,a.Axis.y)>1e-6&&Number.isFinite(a.LowerLimit)&&Number.isFinite(a.UpperLimit)) as SharpAxis[]:[];}

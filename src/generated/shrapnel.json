@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "unityVersion": "2020.3.1f1",
+  "provider": "UnityPy static extraction; not REA runtime evidence",
+  "source": {
+    "file": "level1",
+    "pathId": "2133",
+    "className": "GlobalShrapnelEmitter"
+  },
+  "data": {
+    "m_GameObject": {
+      "m_FileID": 0,
+      "m_PathID": 54
+    },
+    "m_Enabled": 1,
+    "m_Script": {
+      "m_FileID": 1,
+      "m_PathID": 391
+    },
+    "m_Name": "",
+    "Cartridge": {
+      "m_FileID": 2,
+      "m_PathID": 20038
+    },
+    "LayersToHit": {
+      "m_Bits": 10752
+    },
+    "WaterLayer": {
+      "m_Bits": 16
+    }
+  },
+  "cartridge": {
+    "file": "sharedassets0.assets",
+    "pathId": "20038",
+    "data": {
+      "m_GameObject": {
+        "m_FileID": 0,
+        "m_PathID": 0
+      },
+      "m_Enabled": 1,
+      "m_Script": {
+        "m_FileID": 1,
+        "m_PathID": 228
+      },
+      "m_Name": "5.56x45mm",
+      "Damage": 15.0,
+      "Recoil": 0.5,
+      "ImpactForce": 0.20000000298023224,
+      "StartSpeed": 10.0,
+      "PenetrationRandomAngleMultiplier": 0.10000000149011612,
+      "Casing": {
+        "m_FileID": 0,
+        "m_PathID": 0
+      }
+    }
+  },
+  "sources": [
+    {
+      "path": "level1",
+      "sha256": "090f50992f7ff8c6dc942fc9af32a2f6f3a1782a3524015ccc2679c5bc9d7d59",
+      "bytes": 503636
+    },
+    {
+      "path": "sharedassets0.assets",
+      "sha256": "a94e716d4796ae8f848042ba4846ca97081670469e7fef6afa7c1b7efd5e2bb6",
+      "bytes": 19172528
+    },
+    {
+      "path": "Managed/Assembly-CSharp.dll",
+      "sha256": "83597029aadc84f24324858afb64997a6b29e0e402fea206eaa38101bd6bc395",
+      "bytes": 1452544
+    }
+  ]
+}

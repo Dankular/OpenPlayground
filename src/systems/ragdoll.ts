@@ -21,6 +21,7 @@ export interface RagdollOptions {
 export interface ShotInput {damage:number;point:{x:number;y:number};normal:{x:number;y:number};canCrush?:boolean;exit?:boolean}
 export interface RagdollSnapshot {
   version:1;
+  stuns?:{limbId:string;delays:number[]}[];
   person:{consciousness:number;oxygen:number;shock:number;pain:number;adrenaline:number;brainDead:boolean;brainDamaged:boolean;brainDamagedTime:number;seizureTime:number;desiredWalkingDirection:number;overridePoseIndex:number;time:number};
   limbs:{id:string;health:number;initialHealth?:number;numbness:number;broken:boolean;frozen:boolean;internalTemperature:number;blood:number;bloodFlow:number;bleedingRate:number;internalBleeding:number;isPump:boolean;wasInitiallyPumping?:boolean;lungsPunctured:boolean;dismembered:boolean;jointStress:number;acidProgress:number;rottenProgress:number;wounds?:SkinWound[];modifiers?:Record<string,number|boolean>;skinIntensityMultiplier?:number;bloodLossRateMultiplier?:number}[];
 }
@@ -123,6 +124,7 @@ export class RagdollSystem {
   externalLiquidTransport = false;
   getTotalLiquid?: (part:RagdollPart)=>number|undefined;
   private limbByPart = new WeakMap<RagdollPart, LimbState>();
+  private stunDelays = new WeakMap<LimbState,number[]>();
   private options: RagdollOptions;
   constructor(options: RagdollOptions = {}) { this.options = options; }
   private random() { return clamp(this.options.random?.() ?? Math.random()); }
@@ -204,14 +206,16 @@ export class RagdollSystem {
     addSkinWound(limb.skinVisual,type,this.nativePoint(limb,worldPoint),strength,this.time);
     for(const targetId of array(limb.skin.adjacentLimbs).map(id)){const target=limb.person.limbs.find(l=>l.skinId===targetId);if(target)addSkinWound(target.skinVisual,type,this.nativePoint(target,worldPoint),strength,this.time);}
   }
+  addWound(part:RagdollPart,type:DamageKind,point:{x:number;y:number},intensity:number):void {const limb=this.limbFor(part);if(limb&&Number.isFinite(intensity)&&intensity>=0)this.wound(limb,type,point,intensity);}
   private nativePoint(limb:LimbState,worldPoint:{x:number;y:number}){const local=limb.part.body.getLocalPoint(worldPoint);return{x:local.x/(limb.localScale.x||1),y:local.y/(limb.localScale.y||1)};}
   snapshot(entity:RagdollEntity):RagdollSnapshot|undefined {
     const p=this.stateFor(entity);if(!p)return undefined;
-    return{version:1,person:{consciousness:p.consciousness,oxygen:p.oxygen,shock:p.shock,pain:p.pain,adrenaline:p.adrenaline,brainDead:p.brainDead,brainDamaged:p.brainDamaged,brainDamagedTime:p.brainDamagedTime,seizureTime:p.seizureTime,desiredWalkingDirection:p.desiredWalkingDirection,overridePoseIndex:p.overridePoseIndex,time:p.time},limbs:p.limbs.map(l=>({id:l.id,health:l.health,initialHealth:l.initialHealth,numbness:l.numbness,broken:l.broken,frozen:l.frozen,internalTemperature:l.internalTemperature,blood:l.blood,bloodFlow:l.bloodFlow,bleedingRate:l.bleedingRate,internalBleeding:l.internalBleeding,isPump:l.isPump,wasInitiallyPumping:l.wasInitiallyPumping,lungsPunctured:l.lungsPunctured,dismembered:l.dismembered,jointStress:l.jointStress,acidProgress:l.acidProgress,rottenProgress:l.rottenProgress,wounds:l.skinVisual.wounds.map(w=>({...w})),modifiers:Object.fromEntries([...modifierNumbers.filter(k=>typeof l.config[k]==='number').map(k=>[k,l.config[k] as number]),...modifierFlags.map(k=>[k,flag(l.config,k)])]),skinIntensityMultiplier:num(l.skin,'intensityMultiplier',1),bloodLossRateMultiplier:num(l.circulation,'BloodLossRateMultiplier',1)}))};
+    return{version:1,stuns:p.limbs.filter(l=>(this.stunDelays.get(l)?.length??0)>0).map(l=>({limbId:l.id,delays:[...this.stunDelays.get(l)!]})),person:{consciousness:p.consciousness,oxygen:p.oxygen,shock:p.shock,pain:p.pain,adrenaline:p.adrenaline,brainDead:p.brainDead,brainDamaged:p.brainDamaged,brainDamagedTime:p.brainDamagedTime,seizureTime:p.seizureTime,desiredWalkingDirection:p.desiredWalkingDirection,overridePoseIndex:p.overridePoseIndex,time:p.time},limbs:p.limbs.map(l=>({id:l.id,health:l.health,initialHealth:l.initialHealth,numbness:l.numbness,broken:l.broken,frozen:l.frozen,internalTemperature:l.internalTemperature,blood:l.blood,bloodFlow:l.bloodFlow,bleedingRate:l.bleedingRate,internalBleeding:l.internalBleeding,isPump:l.isPump,wasInitiallyPumping:l.wasInitiallyPumping,lungsPunctured:l.lungsPunctured,dismembered:l.dismembered,jointStress:l.jointStress,acidProgress:l.acidProgress,rottenProgress:l.rottenProgress,wounds:l.skinVisual.wounds.map(w=>({...w})),modifiers:Object.fromEntries([...modifierNumbers.filter(k=>typeof l.config[k]==='number').map(k=>[k,l.config[k] as number]),...modifierFlags.map(k=>[k,flag(l.config,k)])]),skinIntensityMultiplier:num(l.skin,'intensityMultiplier',1),bloodLossRateMultiplier:num(l.circulation,'BloodLossRateMultiplier',1)}))};
   }
   restore(entity:RagdollEntity,value:unknown):boolean {
     const p=this.stateFor(entity),data=record(value),person=record(data.person),limbs=array(data.limbs).map(record);
     if(!p||data.version!==1||limbs.length!==p.limbs.length)return false;
+    if(data.stuns!==undefined&&(!Array.isArray(data.stuns)||array(data.stuns).some(value=>{const stun=record(value);return!p.limbs.some(l=>l.id===stun.limbId)||!Array.isArray(stun.delays)||array(stun.delays).some(t=>typeof t!=='number'||!Number.isFinite(t)||t<0||t>.8);})))return false;
     const personNumbers=['consciousness','oxygen','shock','pain','adrenaline','brainDamagedTime','seizureTime','desiredWalkingDirection','overridePoseIndex','time'];
     const limbNumbers=['health','numbness','internalTemperature','blood','bloodFlow','bleedingRate','internalBleeding','jointStress','acidProgress','rottenProgress'];
     const personFlags=['brainDead','brainDamaged'],limbFlags=['broken','frozen','isPump','lungsPunctured','dismembered'];
@@ -229,6 +233,7 @@ export class RagdollSystem {
     for(const l of limbs)if(l.wounds!==undefined&&(!Array.isArray(l.wounds)||l.wounds.length>128||array(l.wounds).some(value=>{const w=record(value);return!finite(w,['x','y','intensity','type','time'])||!Number.isInteger(w.type)||num(w,'type')<0||num(w,'type')>5||num(w,'intensity')<0;})))return false;
     for(const limb of p.limbs){
       const saved=limbs.find(l=>l.id===limb.id)!;
+      this.stunDelays.set(limb,array(record(array(data.stuns).find(value=>record(value).limbId===limb.id)).delays) as number[]);
       if(saved.dismembered&&!limb.dismembered)this.slice(limb.part);
       if(saved.broken&&!limb.broken)this.breakBone(limb.part);else if(!saved.broken&&limb.broken)this.healBone(limb.part);
       for(const key of [...limbNumbers,...limbFlags])Object.assign(limb,{[key]:saved[key]});
@@ -309,6 +314,14 @@ export class RagdollSystem {
     this.refreshConnections(limb.person);
   }
   emp(part:RagdollPart){const limb=this.limbByPart.get(part);if(limb&&flag(limb.config,'IsAndroid'))this.damage(part,limb.health+1,'EMP');}
+  /** LimbBehaviour.StunImpact: charge immediately; organic numbness/blackout after a random delay. */
+  stunImpact(part:RagdollPart,stopAnimationOnDamage=false):void {
+    const limb=this.limbFor(part);if(!limb)return;const physical=this.physical(limb);
+    if(physical)physical.state.charge+=flag(limb.config,'IsAndroid')?10:1;
+    if(flag(limb.config,'IsAndroid'))return;
+    if(limb.connected&&!this.paralysed(limb)){limb.person.pain+=150;if(stopAnimationOnDamage)limb.person.overridePoseIndex=-1;}
+    this.stunDelays.set(limb,[...this.stunDelays.get(limb)??[],this.random()*.8]);
+  }
   private detachJoint(limb:LimbState,alreadyDestroyed=false) {
     const joint=limb.joint;if(!joint)return;
     const p=limb.person,source=p.limbs.find(l=>l.pushesTo.includes(limb));
@@ -491,7 +504,9 @@ export class RagdollSystem {
     this.time+=dt;
     for(const person of this.people.values()){
       person.time=this.time;this.refreshConnections(person);this.updateCirculation(person,dt);this.updatePerson(person,dt);
-      for(const limb of person.limbs)this.updateLimb(limb,dt);
+      for(const limb of person.limbs){this.updateLimb(limb,dt);
+        const delays=this.stunDelays.get(limb);if(delays?.length){const remaining:number[]=[];for(const delay of delays){if(delay<=dt){limb.numbness=1;if(limb.connected)person.consciousness=0;}else remaining.push(delay-dt);}this.stunDelays.set(limb,remaining);}
+      }
     }
   }
   afterStep(_dt:number) {

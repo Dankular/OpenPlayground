@@ -3,6 +3,7 @@ import type { Entity, Part } from '../simulation';
 import type { SourceComponent } from '../prefabs';
 import type { PhysicalSystem } from './physical-world';
 import type { RagdollSystem } from './ragdoll';
+import {targetsPart} from './targeting';
 
 export interface DefibrillatorState {
   component: SourceComponent; part: Part; pads: Part[];
@@ -34,9 +35,9 @@ export class DefibrillatorSystem {
   remove(entity: Entity): void { this.states.delete(entity); }
   get(entity: Entity): readonly DefibrillatorState[] { return this.states.get(entity) ?? []; }
   canUse(entity: Entity): boolean { return this.get(entity).length > 0; }
-  use(entity: Entity): boolean {
+  use(entity: Entity,targetPart?:Part): boolean {
     let used = false;
-    for (const state of this.get(entity)) if (state.phase === 'idle' && !this.options.isDisabled?.(entity, state.component)) {
+    for (const state of this.get(entity)) if (targetsPart(entity,state.part,targetPart)&&state.phase === 'idle' && !this.options.isDisabled?.(entity, state.component)) {
       state.phase = 'standby'; state.remaining = 2; used = true;
       this.options.playClip?.(state.component, state.component.data.StandClearClip, state.part);
     }

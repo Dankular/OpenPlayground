@@ -1,0 +1,48 @@
+# Resource projectile reconstruction
+
+`src/systems/projectiles.ts` consumes the tracked normalized source prefab bundle `src/generated/projectiles.json`. Eleven projectile prefabs and thirteen source launcher references retain source object/component identities. `registerProjectilePrefabs(assets)` caches their `resource:<file>:<GameObject>` identities before scene import. No arbitrary projectile is substituted when a reference cannot be resolved.
+
+## Shipped evidence
+
+Assembly-CSharp.dll SHA-256 `83597029aadc84f24324858afb64997a6b29e0e402fea206eaa38101bd6bc395`, MVID `2457bb93-e7d9-4337-91e2-d226cdef17a0`. Focused REA inspection selected ten projectile/launcher types, 96 fields and 52 methods; selected metadata coverage is complete, no unmatched types. Evidence parent `ev_ebe905fb47800edd6d063f45b35e2e64a667bdebf0839cc53cc826ca061ae4c9`, ignored local export `research/evidence/projectiles-rea-bundle.json`. Decompiled C# resides in ignored `research/local/decompiled`.
+
+| Source method | Build-local token | Implemented behavior |
+| --- | --- | --- |
+| ProjectileBehaviour.Start | 0x06000ca5 | One transformed LocalDirection × Force impulse |
+| DeleteAfterTime.Update | 0x0600062b | Strict elapsed > Life destruction of its own GameObject subtree and end-of-life event |
+| LaunchedRocketBehaviour.FixedUpdate / Update | 0x060008b0 / 0x060008b1 | Compounding immobility slowdown, water slowdown, acceleration/cap, wobble, segment raycast; exact explosion settings and Shot/ExitShot35/Break messages |
+| MachineGunProjectileBehaviour.Update | 0x0600094d | Obsolete source falling raycast trajectory and 8-ray fragmentation explosion; no actual extracted launcher currently references this type |
+| StunnerBehaviour.Update | 0x06000dd6 | Source speed/gravity, mask and StunImpact message without invented ballistic damage |
+| IonBoltBehaviour.DoHitCheck | 0x0600020d | Reflection, source pulse(force,range), 16-collider AoE impulse/burn/optional Break, lifetime × .9 and effect/decal requests |
+| PointToVelocityBehaviour.FixedUpdate | 0x06000c7d | Source degree-angle torque and angular damping, including asymmetric .95–1 clamp |
+| ProjectileLauncherBehaviour.Use / LaunchRoutine | 0x06000caa / 0x06000cae | Launch queued to next fixed update, source prefab/asset resolution, local impulse/recoil, temperature inheritance, child collision suppression, optional root layer override and linked-object cleanup |
+| ProjectileLauncherBehaviour.FixedUpdate | 0x06000cac | Strict automatic timer > AutomaticInterval; held input accumulates timer |
+| RocketLauncherBehaviour.Use | 0x06000cef | Immediate native rocket resource launch at source barrel pose |
+| JavelinMissileBehaviour.FixedUpdate | 0x0600084d | Delayed takeoff, zero gravity, vertical/targeted stages, lead target, torque/damping/thrust/aerodynamics |
+| JavelinMissileBehaviour.OnCollisionEnter2D / Explode / OnEMPHit | 0x0600084f / 0x06000850 / 0x06000851 | Relative speed squared ≥600 explosion gate after takeoff; 64 rays/range40/force90 and pulse force2/range40; shot damage >40; EMP breaks propulsion and restores gravity |
+
+Source TagManager layers Objects9 and Bounds11 yield rocket ray mask2560. ImmobilityField19 is524288. Stunbolt and IonBolt use their extracted masks. Ray queries exclude sensors, matching shipped Physics2DSettings; the immobility overlap check intentionally includes trigger fields.
+
+## Actual extracted projectiles
+
+Tank projectile is **sharedassets0.assets GameObject3281**, not resources.assets. Its Rigidbody11194 has source mass .5 and continuous collision enabled; source capsule, sprite and physical/explosive components remain intact. Projectile20967 applies Force350 along local right, producing700 units/s before physics-engine velocity limits. DeleteAfterTime21251 has Life10. Explosive26330 retains Range27, 32 rays, force2, impact threshold50, temperature threshold500, victim temperature50, dismember chance.3 and its other extracted fields. Vehicle launch supplies temperature300. ProjectileSystem initializes the impulse on first update, after the host has rotated the spawned prefab. WeaponSystem owns its original ExplosiveBehaviour collision/temperature/shot arming and explosion flow; this module does not add a second generic detonation.
+
+Other source roots:3084 LaunchedRocket,3440 Bolt,3574 Stunbolt,4415 Loose spike,4841 Launched Explosive,5317 Launched missile,5701 Launched bazooka round,5720 ion bolt,5936 Crystal and6024 Kogel. Resources without their own motion script rely on the source launcher impulse and existing physical simulation. Rocket3084 accelerates45+45t capped80; bazooka5701 starts/caps200 with acceleration150 and a different explosion. Stunbolt speed50/gravity0; IonBolt speed50/lifetime4. Source IonBolt.Damage exists but is unused in its recovered impact method, so no extra health-damage call is invented.
+
+## Host integration
+
+Construct `ProjectileSystem(simulation, options)`. `spawnResource(prefab, position, angle)` must instantiate the provided normalized prefab and rotate its body poses before returning. The module catches scene-cap/spawn errors and returns null. Attach/remove all entities so ray hits can resolve target parts. Call update once before each fixed physics step and afterStep afterwards (Javelin contact explosions are deferred outside the locked world). Zero-body native raycast projectiles move entity.position/entity.angle, which the renderer and scene save already support.
+
+`launch` accepts the vehicle TankShot payload, resolving the exact catalogue/component reference from the manifest, or an explicit known resource key with position/direction/optional temperature. Discrete use targets the source transform subtree; setHeld controls automatic launchers. Release held flags when input ends. `onExplosion` receives the full typed source ExplosionParameters for shared ExplosionSystem.explode; `onPulse` arguments are **position, force, range**, matching ExplosionCreator. `onMessage` forwards Shot, ExitShot, Break and StunImpact to the corresponding native receivers. Route StunImpact to RagdollSystem.stunImpact(part): its native charge/species/pain/delayed knockout receiver now includes pending-delay snapshots and three focused tests. Effects/audio/source UnityEvents/fin-scale callbacks retain original references for presentation adapters.
+
+Snapshots retain initialization, timers, adjusted lifetime, immobility multiplier, random seed, queued launches and missile stage/broken/takeoff/target point. Body velocity and zero-body pose are retained by Simulation. Reload therefore does not repeat the shell impulse. A dynamic missile target is saved as its current point; restoring a live cross-entity target reference and collision-ignore relations remains a save-fidelity gap. Linked-launcher ownership is restored from validated resource identities and saved scene indices after staged import cleanup.
+
+## Validation and limits
+
+Twenty focused tests pass: tracked prefab identities/settings, rotated shell impulse/heat once, strict lifetime/removal, nested enabled muzzle-flash expiry preserving its Machine Gun and native disabled-timer preservation, rocket water/acceleration, field slowdown/reset, exact bazooka hit explosion/messages, stun-only impact, ion reflection/AoE/lifetime, midflight scene roundtrip/invalid restore, scene-cap handling, Javelin takeoff/EMP/shot gate and explosion reentrancy, actual Bazooka/Crossbow launch paths, actual shell collision through WeaponSystem and Spike Gun automatic interval/release and native LaunchClips fallback, linked Kogel ownership after scene reload/deletion, and partial/duplicate/fractional snapshot rejection. TypeScript passes. Catalogue launcher fixtures are skipped when ignored original catalogue data is unavailable; embedded projectile tests run from tracked resources.
+
+These tests establish source configuration and adapted runtime consequences, not synchronized native Unity parity. Native PerlinNoise is unavailable in managed IL; callers can supply it, otherwise an explicit flagged smooth surrogate drives rocket wobble. Update and FixedUpdate share the host fixed clock. Unity/Planck contacts, inertia and velocity limits can differ. Compound collider decomposition can affect IonBolt's collider-count cap. Particle/trail rendering, detached trail lifetimes, source audio spatial mixing, exact decals and launcher-specific target-selection UnityEvents require presentation/event adapters; retaining their pointers is not proof those visuals execute. Fin scaling is exposed through a callback. GenericScifiProjectileBehaviour contains only fields in this build and no movement body; GorseProjectileBehaviour is outside the eleven launcher-resource family and remains flagged if encountered.
+
+DeleteAfterTime removes the entire entity only for its source root node. Nested timers call Simulation.destroyNode for that transform subtree, dropping its controller states and disabling child visuals/bodies. The original Machine Gun flash, Detached Cannon flash, grenade pin and lever timers are disabled in their shipped templates; this fix does not imply those weapons previously vanished on initial spawn. Runtime enabling of controllers absent at attach remains a separate lifecycle gap.
+
+Launcher audio selection tests Unity pointer path IDs rather than JavaScript object truthiness, and preserves native random LaunchClips / LaunchingSounds fallback. Restore requires the exact current controller count, unique IDs and integer pending launches. Simulation.onNodeDestroy removes controllers for externally destroyed subtrees as well as timer expiry, so child destruction survives scene import without resurrecting timers.

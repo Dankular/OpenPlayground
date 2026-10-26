@@ -180,3 +180,11 @@ binding, source sampler/color-space flags, finite current uniforms and wound/tim
   death/stat/achievement events are incomplete.
 - Passing these tests proves the listed browser behaviors, not full native game
   equivalence or all living prefab variants.
+
+Stunbolt integration adds the native LimbBehaviour.StunImpact receiver:
+Androids receive charge +10 and return; organics receive charge +1, connected
+non-paralysed pain +150, and a random [0,.8] second delay before numbness1 and
+connected-person consciousness0. Optional stopAnimationOnDamage follows the
+caller's preference. Remaining delays are included in snapshots without replaying
+charge/pain. Three focused regressions cover organic delay, Android distinction
+and save/restore; this does not establish native coroutine scheduling parity.

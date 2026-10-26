@@ -4,6 +4,8 @@ import type { SourceComponent } from '../prefabs';
 import { BallisticsSystem, type BulletHit, type BulletTrace, type Cartridge } from './ballistics';
 import { PhysicalSystem, sourceComponent } from './physical-world';
 import { getCharge, getHeatCapacity, ignite } from './physical';
+import {targetsPart} from './targeting';
+import type {ExplosionParameters} from './explosions';
 
 interface GunState { entity: Entity; part: Part; component: SourceComponent; cartridge: Cartridge | null; timer: number; shotIndex: number; pending: number[]; held: boolean }
 interface ExplosiveState { entity: Entity; part: Part; component: SourceComponent; armed: boolean; remaining: number; exploded: boolean }
@@ -27,6 +29,7 @@ export class WeaponSystem {
     resolveCartridge?: (component: SourceComponent, entity: Entity) => Cartridge | null;
     random?: () => number;
     isDisabled?: (entity: Entity, component: SourceComponent) => boolean;
+    onFragmentation?: (parameters:ExplosionParameters,source:Entity)=>void;
   } = {}) {
     this.ballistics = new BallisticsSystem(simulation.world, physical, {
       onTrace: options.onTrace, random: options.random,
@@ -74,22 +77,24 @@ export class WeaponSystem {
     return (this.guns.get(entity) ?? []).some(g => !!g.cartridge && !g.component.data.IgnoreUse) ||
       (this.explosives.get(entity) ?? []).some(e => e.component.data.ArmOnUse !== 0 && !e.exploded);
   }
-  use(entity: Entity): boolean {
+  use(entity: Entity,targetPart?:Part): boolean {
     let used = false;
     for (const gun of this.guns.get(entity) ?? []) {
+      if(!targetsPart(entity,gun.part,targetPart))continue;
       if (gun.component.data.IgnoreUse || !gun.cartridge || this.options.isDisabled?.(entity, gun.component)) continue;
       gun.shotIndex = 0; const delay = num(gun.component.data.FireDelay, 0);
       if (delay > 0) gun.pending.push(delay); else this.fire(gun);
       used = true;
     }
     for (const explosive of this.explosives.get(entity) ?? []) {
+      if(!targetsPart(entity,explosive.part,targetPart))continue;
       if (this.options.isDisabled?.(entity, explosive.component)) continue;
       if (explosive.component.data.ArmOnUse === 0 || explosive.component.data.ArmOnUse === false) continue;
       this.arm(explosive); used = true;
     }
     return used;
   }
-  setHeld(entity: Entity, held: boolean): void { for (const gun of this.guns.get(entity) ?? []) gun.held = held; }
+  setHeld(entity: Entity, held: boolean,targetPart?:Part): void { for (const gun of this.guns.get(entity) ?? []) if(targetsPart(entity,gun.part,targetPart))gun.held = held; }
   snapshot(entity: Entity): unknown {
     return {
       guns: (this.guns.get(entity) ?? []).map(g => ({ id: g.component.pathId, timer: g.timer, shotIndex: g.shotIndex, pending: [...g.pending] })),
@@ -119,6 +124,7 @@ export class WeaponSystem {
     for (const ex of this.explosives.get(owner) ?? [])
       if (ex.part === part && this.random() < num(ex.component.data.ShotExplodeChance, 1)) this.arm(ex, this.random() * .2);
   }
+  receiveShot(part:Part,exit=false):void {if(!exit)this.shotTarget(part);}
   beforeStep(dt: number): void {
     for (const guns of this.guns.values()) for (const gun of guns) {
       if (this.options.isDisabled?.(gun.entity, gun.component)) {gun.pending=[];gun.held=false;continue;}
@@ -139,6 +145,10 @@ export class WeaponSystem {
     this.ballistics.step(dt);
   }
   private random(): number { return (this.options.random ?? Math.random)(); }
+  fragmentHit(part:Part):void {
+    const owner=this.byBody.get(part.body)?.entity;if(!owner)return;
+    for(const ex of this.explosives.get(owner)??[])if(ex.part===part&&ex.component.data.ExplodesOnFragmentHit&&!ex.armed)this.arm(ex,.05);
+  }
   private fire(gun: GunState): void {
     if (!gun.cartridge || this.options.isDisabled?.(gun.entity, gun.component)) return;
     const c = gun.cartridge, config = gun.component.data, p = this.physical.get(gun.part), body = gun.part.body;
@@ -166,7 +176,8 @@ export class WeaponSystem {
     const c = ex.component.data, position = Vec2(ex.part.body.getPosition());
     const range = Math.max(0, num(c.Range, 27)), force = num(c.FragmentForce, 2);
     const rays = Math.max(0, Math.floor(num(c.FragmentationRayCount, 32)));
-    for (let i = 0; i < rays; i++) {
+    if(this.options.onFragmentation)this.options.onFragmentation({Position:position,Range:range,FragmentForce:force,FragmentationRayCount:rays,CreateParticlesAndSound:c.ParticleEffectAndSound===undefined||!!c.ParticleEffectAndSound,EffectSize:c.BigExplosion?2:0,DismemberChance:num(c.DismemberChance,0),BallisticShrapnelCount:num(c.BallisticShrapnelCount,0)},ex.entity);
+    else for (let i = 0; i < rays; i++) {
       const angle = i / rays * Math.PI * 2, direction = Vec2(Math.cos(angle), Math.sin(angle));
       const hit = this.ballistics.rayCast(ex.entity, position, Vec2.add(position, Vec2.mul(direction, range)));
       if (!hit) continue;
@@ -191,7 +202,7 @@ export class WeaponSystem {
       if ((targetTemperature > 0 && p.state.temperature < targetTemperature) || (targetTemperature < 0 && p.state.temperature > targetTemperature))
         p.state.temperature += (targetTemperature - p.state.temperature) * Math.min(1, .035 / getHeatCapacity(p));
     }
-    this.options.onExplosion?.(position, range, ex.entity);
+    if(!this.options.onFragmentation)this.options.onExplosion?.(position, range, ex.entity);
     if (c.DestroyOnExplode || c.DisintegrateOnExplode) this.simulation.remove(ex.entity);
   }
 }

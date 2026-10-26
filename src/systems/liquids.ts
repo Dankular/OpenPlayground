@@ -1,5 +1,7 @@
 import type { Entity, Part } from '../simulation';
 import type { SourceComponent } from '../prefabs';
+import { Vec2 } from 'planck';
+import { targetsPart } from './targeting';
 
 type Data = Record<string, unknown>;
 const record = (v: unknown): Data => v && typeof v === 'object' && !Array.isArray(v) ? v as Data : {};
@@ -55,6 +57,7 @@ export interface ReservoirOptions {
   part?: Part; kind?: 'circulation' | 'syringe' | 'flask' | 'tank' | 'container'; originalBlood?: string | null;
   lower?: number; capacity?: number; allowsOverflow?: boolean; allowPressureTransfer?: boolean;
   pressureMode?: PressureDirection; enabled?: boolean;
+  allowsTransfer?: boolean;
   enter?: (id: string) => void; exit?: (id: string) => void;
 }
 
@@ -66,6 +69,7 @@ export class LiquidReservoir {
   readonly originalBlood: string | null;
   lower: number; capacity: number; allowsOverflow: boolean; allowPressureTransfer: boolean;
   pressureMode: PressureDirection; measuredPressure = 0; enabled: boolean; timer = 0;
+  allowsTransfer: boolean;
   private cleanupRequested = false;
   private cachedColor: LiquidColor = color(0, 0, 0, 0);
   constructor(readonly options: ReservoirOptions = {}) {
@@ -73,6 +77,7 @@ export class LiquidReservoir {
     this.lower = options.lower ?? 0; this.capacity = options.capacity ?? 1; this.allowsOverflow = options.allowsOverflow ?? true;
     this.allowPressureTransfer = options.allowPressureTransfer ?? true; this.pressureMode = options.pressureMode ?? PressureDirection.None;
     this.enabled = options.enabled ?? true;
+    this.allowsTransfer=options.allowsTransfer??true;
   }
   get total(): number { return [...this.distribution.values()].reduce((sum, value) => sum + value.amount, 0); }
   get upper(): number { return this.allowsOverflow ? Number.MAX_VALUE : this.capacity; }
@@ -195,7 +200,7 @@ export interface LiquidSystemOptions {
 }
 export interface LiquidSnapshot { version: 1; containers: { partId: string; measuredPressure: number; timer: number;
   distribution: { id: string; amount: number; previous: number }[];
-  syringe?: { finite: boolean; pressureMode: PressureDirection; fingerprint?: number[] }; tankMode?: number }[] }
+  syringe?: { finite: boolean; pressureMode: PressureDirection; fingerprint?: number[] }; tankMode?: number; pumpMode?: number }[] }
 
 export class LiquidSystem {
   readonly containers = new Map<Part, LiquidReservoir>();
@@ -205,10 +210,13 @@ export class LiquidSystem {
   private oscillator = new Map<Part, boolean>();
   private sources = new Map<Part, string>();
   private tanks = new Map<Part, { mode: number; drainRate: number }>();
+  private pumps = new Map<Part, SourceComponent>();
+  private elapsed=0;
   constructor(readonly options: LiquidSystemOptions = {}) {}
   get(part: Part): LiquidReservoir | undefined { return this.containers.get(part); }
   getSyringe(part: Part): SyringeState | undefined { return this.syringes.get(part); }
   syringesFor(entity: Entity): SyringeState[] { return entity.parts.flatMap(p => this.syringes.get(p) ?? []); }
+  canUse(entity:Entity,targetPart?:Part):boolean{return entity.parts.some(p=>targetsPart(entity,p,targetPart)&&(this.syringes.has(p)||this.tanks.has(p)||this.pumps.has(p)));}
 
   attach(entity: Entity): void {
     if (this.entities.has(entity)) return;
@@ -220,13 +228,21 @@ export class LiquidSystem {
       const flask = rows(part).find(c => c.className === 'FlaskBehaviour');
       const canister = rows(part).find(c => c.className === 'LiquidCanisterBehaviour');
       const tank = rows(part).find(c => c.className === 'BloodTankBehaviour');
-      const source = syringeSource ?? circulation ?? flask ?? canister ?? tank;
+      const pump = rows(part).find(c => c.className === 'LiquidPumpBehaviour');
+      const valve = rows(part).find(c => c.className === 'ValveBehaviour' || c.className === 'LiquidPressureValveBehaviour');
+      const duplicator = rows(part).find(c => c.className === 'LiquidDuplicatorBehaviour');
+      const outlet = rows(part).find(c => c.className === 'LiquidOutletBehaviour');
+      const filter = rows(part).find(c => c.className === 'LiquidFilterBehaviour');
+      const identifier = rows(part).find(c => c.className === 'LiquidentifierBehaviour');
+      const source = syringeSource ?? circulation ?? flask ?? canister ?? tank ?? pump ?? valve ?? duplicator ?? outlet ?? filter ?? identifier;
       if (!source) continue;
       const kind = syringeSource ? 'syringe' : circulation ? 'circulation' : flask ? 'flask' : tank ? 'tank' : 'container';
       const limb = rows(part).find(c => c.className === 'LimbBehaviour')?.data;
       const originalBlood = circulation ? typeof limb?.BloodLiquidType === 'string' ? limb.BloodLiquidType : limb?.SpeciesIdentity === 'Android' ? 'OIL' : limb?.SpeciesIdentity === 'Gorse' ? 'GORSE BLOOD' : 'BLOOD' : null;
-      const container = new LiquidReservoir({ part, kind, originalBlood, capacity: syringeSource ? 1.4 : flask ? number(flask.data.Capacity, 2.8) : canister ? number(canister.data.Capacity, 70) : tank ? 14 : 1,
-        allowsOverflow: !!circulation, pressureMode: syringeSource ? number(source.data.PressureMode, PressureDirection.Push) : PressureDirection.None,
+      const valveOpen = valve ? number(valve.data.ValvePosition) > .5 : true;
+      const container = new LiquidReservoir({ part, kind, originalBlood, capacity: syringeSource ? 1.4 : flask ? number(flask.data.Capacity, 2.8) : canister ? number(canister.data.Capacity, 70) : tank ? 14 : valve ? .5 : duplicator ? number(duplicator.data.Capacity, 1.7857144) : outlet ? 2.8 : filter ? 28 : identifier ? 7 : 1,
+        allowsOverflow: !!(circulation || duplicator || outlet), allowsTransfer:!pump && (!valve || valve.className === 'ValveBehaviour' && valveOpen), allowPressureTransfer:valveOpen,
+        pressureMode: syringeSource ? number(source.data.PressureMode, PressureDirection.Push) : pump?number(pump.data.Mode,PressureDirection.None):outlet ? PressureDirection.Pull : duplicator && flag(duplicator.data.Activated) ? PressureDirection.Push : PressureDirection.None,
         enabled: flag(source.data.m_Enabled, true),
         enter: id => { this.options.effects?.enter(part, id, container); this.syncToRagdoll(part); this.options.onChanged?.(part, container); },
         exit: id => { this.options.effects?.exit?.(part, id, container); this.options.onChanged?.(part, container); },
@@ -249,6 +265,7 @@ export class LiquidSystem {
         else if (syringe.spawnLiquid && flag(source.data.NewlySpawned, true)) container.addLiquid(syringe.spawnLiquid, 1.4);
       }
       if (tank) { const state = { mode: number(tank.data.Mode, 2), drainRate: number(tank.data.DrainRate, 1) }; this.tanks.set(part, state); this.updateTankPressure(container, state.mode); }
+      if(pump)this.pumps.set(part,pump);
       const infinite = rows(part).find(c => c.className === 'InfiniteLiquidSourceBehaviour');
       if (typeof infinite?.data.LiquidID === 'string' && LIQUIDS.has(infinite.data.LiquidID)) this.sources.set(part, infinite.data.LiquidID);
     }
@@ -258,6 +275,7 @@ export class LiquidSystem {
       const container = this.containers.get(part);
       if (container) for (const syringe of this.syringes.values()) syringe.pushTargets.delete(container);
       this.containers.delete(part); this.syringes.delete(part); this.owner.delete(part); this.oscillator.delete(part); this.sources.delete(part); this.tanks.delete(part);
+      this.pumps.delete(part);
     }
     this.entities.delete(entity);
   }
@@ -273,15 +291,18 @@ export class LiquidSystem {
   }
   setFinite(entity: Entity, finite: boolean): void { for (const s of this.syringesFor(entity)) if (s.canToggleInfinite) { s.finite = finite; s.container.pressureMode = PressureDirection.Push; } }
   toggleInfinite(entity: Entity): void { for (const s of this.syringesFor(entity)) if (s.canToggleInfinite) { s.finite = !s.finite; s.container.pressureMode = PressureDirection.Push; } }
-  use(entity: Entity, channel = 0): boolean {
+  use(entity: Entity, channel = 0, targetPart?: Part): boolean {
     let handled = false;
     for (const syringe of this.syringesFor(entity)) {
+      if(!targetsPart(entity,syringe.part,targetPart))continue;
       handled = true;
       if (channel === 1) syringe.container.pressureMode = PressureDirection.Push;
       else if (channel === 2) { if (syringe.finite) syringe.container.pressureMode = PressureDirection.Pull; }
       else syringe.container.pressureMode = syringe.container.pressureMode === PressureDirection.Push ? PressureDirection.Pull : PressureDirection.Push;
     }
     for (const part of entity.parts) {
+      if(!targetsPart(entity,part,targetPart))continue;
+      if(this.pumps.has(part)){const c=this.containers.get(part)!;c.pressureMode=(c.pressureMode+(channel===1?2:1))%3;handled=true;}
       const tank = this.tanks.get(part); if (!tank) continue;
       handled = true; tank.mode = (tank.mode + (channel === 1 ? 3 : 1)) % 4; this.updateTankPressure(this.containers.get(part)!, tank.mode);
     }
@@ -299,7 +320,17 @@ export class LiquidSystem {
     const container = this.containers.get(part);
     if (container?.originalBlood) this.options.setBlood?.(part, container.getAmount(container.originalBlood));
   }
+  /** Publish an external reservoir mutation before the next physiology import. */
+  syncPart(part: Part): void {
+    this.syncToRagdoll(part);
+    const container = this.containers.get(part); if (container) this.options.onChanged?.(part, container);
+  }
   beforeStep(dt: number): void {
+    this.elapsed+=dt;
+    for(const [part,source] of this.pumps){const c=this.containers.get(part)!;if(!c.enabled||!part.body.isActive()||c.pressureMode===PressureDirection.None)continue;
+      const theta=this.elapsed*number(source.data.VibrateRotationSpeed),force=number(source.data.VibrateForce)*(c.pressureMode===PressureDirection.Push?1:-1);
+      part.body.applyForceToCenter(part.body.getWorldVector(Vec2(Math.cos(theta)*force,Math.sin(theta)*force)),true);
+    }
     for (const part of this.containers.keys()) this.syncFromRagdoll(part);
     for (const syringe of this.syringes.values()) {
       const c = syringe.container; if (!c.enabled || !syringe.part.body.isActive()) continue;
@@ -370,7 +401,7 @@ export class LiquidSystem {
       return { partId: part.id ?? String(entity.parts.indexOf(part)), measuredPressure: c.measuredPressure, timer: c.timer,
         distribution: [...c.distribution].map(([id, value]) => ({ id, ...value })),
         ...(s ? { syringe: { finite: s.finite, pressureMode: c.pressureMode, ...(s.fingerprint ? { fingerprint: [...s.fingerprint] } : {}) } } : {}),
-        ...(this.tanks.has(part) ? { tankMode: this.tanks.get(part)!.mode } : {}) };
+        ...(this.tanks.has(part) ? { tankMode: this.tanks.get(part)!.mode } : {}),...(this.pumps.has(part)?{pumpMode:c.pressureMode}:{}) };
     }) };
   }
   restore(entity: Entity, value: unknown): boolean {
@@ -393,6 +424,7 @@ export class LiquidSystem {
         if (s.fingerprint !== undefined && (!Array.isArray(s.fingerprint) || !s.fingerprint.length || s.fingerprint.length > 64 || s.fingerprint.some(x => typeof x !== 'number' || !Number.isFinite(x) || Math.abs(x) > 1))) return false;
       }
       if (this.tanks.has(part) && ![0, 1, 2, 3].includes(number(saved.tankMode, -1))) return false;
+      if(this.pumps.has(part)&&![0,1,2].includes(number(saved.pumpMode,-1)))return false;
       staged.push({ part, data: saved, distribution: distribution as unknown as { id: string; amount: number; previous: number }[] });
     }
     for (const { part, data: saved, distribution } of staged) {
@@ -405,6 +437,7 @@ export class LiquidSystem {
         if (s.fingerprint) this.initializePink(syringe, s.fingerprint, false);
       }
       const tank = this.tanks.get(part); if (tank) { tank.mode = number(saved.tankMode); this.updateTankPressure(c, tank.mode); }
+      if(this.pumps.has(part))c.pressureMode=number(saved.pumpMode);
       this.syncToRagdoll(part);
     }
     for (const { part } of staged) {

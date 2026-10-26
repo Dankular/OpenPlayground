@@ -16,6 +16,15 @@ const gun = (extra = {}): SourceComponent => ({ type: 'MonoBehaviour', className
 } as unknown as SourceComponent);
 
 describe('firearm and explosive controllers', () => {
+  it('forwards original explosion parameters to the shared native fragmentation engine once',()=>{
+    const sim=new Simulation(),physical=new PhysicalSystem(),source=sim.spawn('box',0,5);
+    configure(source,{type:'MonoBehaviour',className:'ExplosiveBehaviour',pathId:'explosive',data:{Delay:0,ArmOnUse:1,Range:10,FragmentForce:2,FragmentationRayCount:4,BallisticShrapnelCount:8,BigExplosion:true,ParticleEffectAndSound:true}});
+    const forwarded:unknown[]= [];let oldEffects=0,oldFragments=0;
+    const weapons=new WeaponSystem(sim,physical,{onFragmentation:p=>forwarded.push(p),onExplosion:()=>oldEffects++,onFragment:()=>oldFragments++});
+    weapons.attach(source);weapons.use(source);weapons.beforeStep(.02);
+    expect(forwarded).toHaveLength(1);expect(forwarded[0]).toMatchObject({Range:10,FragmentForce:2,FragmentationRayCount:4,BallisticShrapnelCount:8,EffectSize:2,CreateParticlesAndSound:true});
+    expect(oldEffects).toBe(0);expect(oldFragments).toBe(0);
+  });
   it('fires recovered cartridge data with recoil, heat, and a real ray hit', () => {
     const sim = new Simulation(), physical = new PhysicalSystem();
     const source = sim.spawn('box', 0, 5), target = sim.spawn('box', 3, 5); configure(source, gun());

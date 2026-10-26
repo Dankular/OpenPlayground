@@ -11,6 +11,14 @@ export function sourceComponent(part: Part, name: string): SourceComponent | und
   return part.metadata?.components.find(c => c.className === name || c.type === name);
 }
 
+/** Unity retains Rigidbody2D.mass while frozen/static; Planck reports zero. */
+export function physicalMass(part:Part):number {
+  const mass=part.body.getMass();if(mass>0)return mass;
+  const retained=part.frozenMass??part.nativeMass;if(typeof retained==='number'&&Number.isFinite(retained)&&retained>0)return retained;
+  const source=sourceComponent(part,'Rigidbody2D')?.data.m_Mass;
+  return typeof source==='number'&&Number.isFinite(source)&&source>0?source:mass;
+}
+
 export class PhysicalSystem {
   readonly objects = new Map<Part, PhysicalObject>();
   private byBody = new Map<Body, PhysicalObject>();
@@ -46,7 +54,7 @@ export class PhysicalSystem {
       const renderer = entity.renderers?.find(r => r.bodyId === part.id);
       const node = entity.metadata?.nodes.find(n => n.id === part.metadata?.nodeId);
       const state = createPhysicalObject({ ambientTemperature: this.ambientTemperature,
-        mass: part.body.getMass(), width: renderer?.sprite.width ?? part.width,
+        mass: physicalMass(part), width: renderer?.sprite.width ?? part.width,
         height: renderer?.sprite.height ?? part.height, settings, properties,
         isStatic: Boolean((node as unknown as { isStatic?: boolean })?.isStatic) });
       this.objects.set(part, state); this.byBody.set(part.body, state);
@@ -60,11 +68,12 @@ export class PhysicalSystem {
     this.byEntity.delete(entity);
   }
   frame(deltaTime: number, timeScale: number): void {
-    for (const object of this.objects.values()) updatePhysicalFrame(object, deltaTime, timeScale);
+    for (const [part,object] of this.objects)if(part.body.isActive())updatePhysicalFrame(object, deltaTime, timeScale);
   }
   beforeStep(_dt: number): void {
     for (const [part, object] of this.objects) {
-      object.mass = part.body.getMass();
+      if(!part.body.isActive())continue;
+      const mass=physicalMass(part);if(mass>0)object.mass=mass;
       stepPhysical(object, this.ambientTemperature, this.options.random);
     }
   }

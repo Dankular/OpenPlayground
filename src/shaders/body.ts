@@ -71,7 +71,8 @@ const TEXTURE_NAMES=['_MainTex','_FleshTex','_BoneTex','_DamageTex'];
 export class BodyShaderLibrary {
   private textureLoader=new THREE.TextureLoader();
   private textures=new Map<string,THREE.Texture>();
-  private constructor(readonly materials:Map<string,BodyMaterialSource>,readonly fragmentShader:string,readonly sourceUrl:string,readonly projectColorSpace:number){}
+  outputLinear=false;
+  private constructor(readonly materials:Map<string,BodyMaterialSource>,readonly fragmentShader:string,readonly sourceUrl:string,readonly projectColorSpace:number,readonly linearFragmentShader:string){}
   static async load():Promise<BodyShaderLibrary|null>{
     try{
       const response=await fetch(path('/local-assets/body-materials.json'));
@@ -82,7 +83,8 @@ export class BodyShaderLibrary {
       if(!shaderUrl)throw new Error('Extracted body-material manifest omits GLCore shader URL');
       const shader=await fetch(path(shaderUrl));if(!shader.ok)throw new Error('Extracted body shader is missing');
       const colorSpace=value.projectColorSpace??1; // Recorded source PlayerSettings is Linear (1).
-      return new BodyShaderLibrary(new Map(sources.map(m=>[m.key,m])),adaptBodyFragment(await shader.text(),colorSpace===1),shaderUrl,colorSpace);
+      const raw=await shader.text();
+      return new BodyShaderLibrary(new Map(sources.map(m=>[m.key,m])),adaptBodyFragment(raw,colorSpace===1),shaderUrl,colorSpace,adaptBodyFragment(raw,false));
     }catch(error){console.info('Native body shader unavailable.',error);return null;}
   }
   private texture(source:BodyTexture) {
@@ -116,7 +118,7 @@ export class BodyShaderLibrary {
       _NativeOffset:{value:new THREE.Vector2(offset.x+(.5-sprite.pivot.x)*sprite.width,offset.y+(.5-sprite.pivot.y)*sprite.height)},
       _NativeScale:{value:new THREE.Vector2(scale.x||1,scale.y||1)},_Flip:{value:new THREE.Vector2(sprite.flipX?-1:1,sprite.flipY?-1:1)},
     });
-    const material=new THREE.RawShaderMaterial({vertexShader:BODY_VERTEX_SHADER,fragmentShader:this.fragmentShader,uniforms,glslVersion:THREE.GLSL3,side:THREE.DoubleSide,transparent:true,depthWrite:false,toneMapped:false});
+    const material=new THREE.RawShaderMaterial({vertexShader:BODY_VERTEX_SHADER,fragmentShader:this.outputLinear?this.linearFragmentShader:this.fragmentShader,uniforms,glslVersion:THREE.GLSL3,side:THREE.DoubleSide,transparent:true,depthWrite:false,toneMapped:false});
     material.name=`Native body: ${source.name}`;material.userData.nativeBodyShader=true;material.userData.sourceMaterial=source.key;material.userData.sourceShader=this.sourceUrl;
     return material;
   }

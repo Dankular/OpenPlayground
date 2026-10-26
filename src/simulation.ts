@@ -4,9 +4,9 @@ import type { HumanRig, RigSprite } from './assets';
 import type { AssetLibrary, Prefab, PrefabRenderer, SourceComponent, SourceNode, PrefabJoint } from './prefabs';
 import { colliderShapes } from './geometry';
 
-export interface Part { id?: string; body: Body; width: number; height: number; shape: 'box' | 'circle'; color: string; label: string; sprite?: RigSprite; initialType?: BodyType; metadata?: { components: SourceComponent[]; nodeId: string; active?:boolean } }
-export interface Entity { id: number; kind: ItemKind | 'prefab'; catalogId?: string; prefabId?: string; name?: string; parts: Part[]; joints: Joint[]; jointById?: Map<string,Joint>; frozen: boolean; rig?: 'local'; renderers?: PrefabRenderer[]; position?: {x:number;y:number}; angle?: number; metadata?: {nodes:SourceNode[]}; unsupported?: string[]; isEnvironment?:boolean }
-export interface SavedEntity { kind: ItemKind | 'prefab'; catalogId?: string; prefabId?: string; frozen: boolean; rig?: 'local'; position?:{x:number;y:number}; angle?:number; activeJointIds?:string[]; systems?:Record<string,unknown>; parts: { id?:string; x: number; y: number; angle: number; vx: number; vy: number; av: number }[] }
+export interface Part { id?: string; body: Body; width: number; height: number; shape: 'box' | 'circle'; color: string; label: string; sprite?: RigSprite; initialType?: BodyType; nativeMass?:number; frozenMass?:number; metadata?: { components: SourceComponent[]; nodeId: string; active?:boolean } }
+export interface Entity { id: number; kind: ItemKind | 'prefab'; catalogId?: string; prefabId?: string; name?: string; parts: Part[]; joints: Joint[]; jointById?: Map<string,Joint>; frozen: boolean; rig?: 'local'; renderers?: PrefabRenderer[]; position?: {x:number;y:number}; angle?: number; metadata?: {nodes:SourceNode[]}; unsupported?: string[]; isEnvironment?:boolean;destroyedNodeIds?:Set<string> }
+export interface SavedEntity { kind: ItemKind | 'prefab'; catalogId?: string; prefabId?: string; frozen: boolean; rig?: 'local'; position?:{x:number;y:number}; angle?:number; activeJointIds?:string[]; systems?:Record<string,unknown>;destroyedNodeIds?:string[]; parts: { id?:string; x: number; y: number; angle: number; vx: number; vy: number; av: number;mass?:number;inertia?:number;center?:{x:number;y:number} }[] }
 export interface SceneData { format: 'open-playground'; version: 1|2; buildId?: string|null; environment?:SavedEntity; systems?:Record<string,unknown>; entities: SavedEntity[] }
 const kinds: ItemKind[] = ['human', 'box', 'ball', 'plank'];
 
@@ -23,11 +23,25 @@ export class Simulation {
   afterStep: ((dt:number)=>void)[]=[];
   onSpawn: ((entity:Entity)=>void)[]=[];
   onRemove: ((entity:Entity)=>void)[]=[];
+  onNodeDestroy: ((entity:Entity,nodeIds:ReadonlySet<string>,parts:readonly Part[])=>void)[]=[];
   stateAdapters = new Map<string,{capture:(entity:Entity)=>unknown;restore:(entity:Entity,value:unknown)=>boolean|void}>();
   importTransactions = new Map<string,{capture:()=>unknown;rollback:(value:unknown)=>void}>();
   sceneAdapters = new Map<string,{capture:(entities:Entity[])=>unknown;restore:(entities:Entity[],value:unknown)=>boolean|(()=>void)}>();
+  generatedJointIds?: (prefab:Prefab)=>ReadonlySet<string>;
+  replaceJointReference(previous:Joint,replacement:Joint):void {
+    const entry=this.breakableJoints.get(previous);if(entry){this.breakableJoints.delete(previous);this.breakableJoints.set(replacement,entry);}
+    for(const entity of this.renderEntities){entity.joints=entity.joints.map(j=>j===previous?replacement:j);for(const [id,joint]of entity.jointById??[])if(joint===previous)entity.jointById!.set(id,replacement);}
+  }
+  setJointBreakForce(joint:Joint,force:number):boolean {
+    if(Number.isNaN(force)||force<0)return false;
+    const previous=this.breakableJoints.get(joint),entity=previous?.entity??this.renderEntities.find(e=>e.joints.includes(joint));if(!entity)return false;
+    const torque=previous?.torque??Infinity;
+    if(!Number.isFinite(force)&&!Number.isFinite(torque))this.breakableJoints.delete(joint);else this.breakableJoints.set(joint,{entity,force,torque});return true;
+  }
   private suppressHooks=false;
   private breakableJoints=new Map<Joint,{entity:Entity;force:number;torque:number}>();
+  private frozenMotion=new WeakMap<Part,{type:BodyType;velocity:{x:number;y:number};angularVelocity:number;massData:{mass:number;center:{x:number;y:number};I:number}}>();
+  massFor(part:Part):number {const mass=part.body.getMass();return mass>0?mass:part.frozenMass??part.nativeMass??0;}
   private accumulator = 0;
   private nextId = 1;
   constructor(readonly humanRig: HumanRig | null = null, readonly assets: AssetLibrary | null = null) {
@@ -41,7 +55,7 @@ export class Simulation {
     const part = (label: string, dx: number, dy: number, w: number, h: number, color: string, circle = false, density = 1) => {
       const body = this.world.createDynamicBody({ position: Vec2(x + dx, y + dy), linearDamping: .08, angularDamping: .15 });
       body.createFixture(circle ? Circle(w / 2) : Box(w / 2, h / 2), { density, friction: .65, restitution: kind === 'ball' ? .4 : .05, filterGroupIndex: group });
-      entity.parts.push({ body, width: w, height: h, shape: circle ? 'circle' : 'box', color, label });
+      entity.parts.push({ body, width: w, height: h, shape: circle ? 'circle' : 'box', color, label,nativeMass:body.getMass() });
       body.setUserData(entity);
       return body;
     };
@@ -58,7 +72,7 @@ export class Simulation {
           if(c.type==='polygon'&&c.paths)for(const path of c.paths)body.createFixture(Polygon(path.map(pt=>Vec2(pt.x+offset.x,pt.y+offset.y))),{density:1,friction:.65,restitution:.05,filterGroupIndex:group,isSensor:c.isTrigger??false});
         }
         const mass=body.getMass(); if (mass>0) {const md={mass:0,center:Vec2(),I:0};body.getMassData(md);body.setMassData({mass:p.mass,center:md.center,I:md.I*p.mass/mass});}
-        entity.parts.push({body,width:p.sprite?.width??.2,height:p.sprite?.height??.3,shape:'box',color:'#dfbfa9',label:p.name,sprite:p.sprite});body.setUserData(entity);bodies.set(p.id,body);
+        entity.parts.push({body,width:p.sprite?.width??.2,height:p.sprite?.height??.3,shape:'box',color:'#dfbfa9',label:p.name,sprite:p.sprite,nativeMass:p.mass});body.setUserData(entity);bodies.set(p.id,body);
       }
       for (const j of this.humanRig.joints) {
         const bodyA=bodies.get(j.bodyA),bodyB=bodies.get(j.bodyB);if(!bodyA||!bodyB)continue;
@@ -104,7 +118,7 @@ export class Simulation {
         const body=this.world.createBody({type,position:Vec2(x+p.position.x,y+p.position.y),angle:p.angle,linearDamping:p.linearDamping,angularDamping:p.angularDamping,gravityScale:p.gravityScale??1,fixedRotation:p.fixedRotation??false,bullet:p.bullet??false});
         const components=p.metadata?.components??p.components??prefab.nodes.find(n=>n.id===p.nodeId)?.components??[];
         const active=prefab.nodes.find(n=>n.id===p.nodeId)?.active!==false;
-        const part:Part={id:p.id,body,width:p.sprite?.width??.2,height:p.sprite?.height??.2,shape:'box',color:'#cccccc',label:p.name,initialType:type,metadata:{components,nodeId:p.nodeId??'',active}};
+        const part:Part={id:p.id,body,width:p.sprite?.width??.2,height:p.sprite?.height??.2,shape:'box',color:'#cccccc',label:p.name,initialType:type,nativeMass:p.mass,metadata:{components,nodeId:p.nodeId??'',active}};
         e.parts.push(part);bodies.set(p.id,body);body.setUserData(e);
         if(p.simulated===false||!active)body.setActive(false);
         for(const c of p.colliders){
@@ -132,6 +146,12 @@ export class Simulation {
     const next=this.spawnPrefab(prefab.catalogId,0,0,prefab,true);
     if(this.environment)this.remove(this.environment);
     this.environment=next;this.entities=this.entities.filter(e=>e!==next);this.ground.getFixtureList()?.setSensor(true);return next;
+  }
+  spawnResourcePrefab(prefab:Prefab,position:{x:number;y:number},angle=0):Entity {
+    this.assets?.prefabs.set(prefab.catalogId,prefab);
+    const entity=this.spawnPrefab(prefab.catalogId,position.x,position.y,prefab),cos=Math.cos(angle),sin=Math.sin(angle);
+    for(const part of entity.parts){const p=part.body.getPosition(),x=p.x-position.x,y=p.y-position.y;part.body.setTransform({x:position.x+x*cos-y*sin,y:position.y+x*sin+y*cos},part.body.getAngle()+angle);}
+    entity.angle=angle;return entity;
   }
   private createPrefabJoint(s:PrefabJoint,bodyA:Body,bodyB:Body,x:number,y:number):Joint|null {
     const raw=s.data??{},suspension=(raw.m_Suspension??{}) as Record<string,unknown>,motor=(raw.m_Motor??{}) as Record<string,unknown>,limits=(raw.m_TranslationLimits??{}) as Record<string,unknown>;
@@ -199,10 +219,32 @@ export class Simulation {
     if(this.environment===entity){this.environment=null;this.ground.getFixtureList()?.setSensor(false);}
   }
   clear() { this.endDrag(); for (const e of [...this.entities]) this.remove(e); this.accumulator = 0; }
+  destroyNode(entity:Entity,nodeId:string):void {
+    const nodes=entity.metadata?.nodes,node=nodes?.find(n=>n.id===nodeId);if(!nodes||!node||entity.destroyedNodeIds?.has(nodeId))return;
+    if(node.parentId===null){this.remove(entity);return;}
+    const affected=new Set([nodeId]);let changed=true;
+    while(changed){changed=false;for(const child of nodes)if(child.parentId&&affected.has(child.parentId)&&!affected.has(child.id)){affected.add(child.id);changed=true;}}
+    const parts=entity.parts.filter(p=>!!p.metadata&&affected.has(p.metadata.nodeId));
+    this.onNodeDestroy.forEach(fn=>fn(entity,affected,parts));
+    entity.destroyedNodeIds??=new Set();for(const id of affected)entity.destroyedNodeIds.add(id);
+    for(const n of nodes)if(affected.has(n.id))n.active=false;
+    for(const renderer of entity.renderers??[])if(renderer.nodeId&&affected.has(renderer.nodeId))renderer.enabled=false;
+    for(const part of parts){if(this.drag?.getBodyB()===part.body)this.endDrag();part.metadata!.active=false;part.body.setActive(false);}
+  }
   freeze(entity: Entity) {
     this.endDrag();
     entity.frozen = !entity.frozen;
-    for (const part of entity.parts) { part.body.setType(entity.frozen ? 'static' : part.initialType??'dynamic'); part.body.setAwake(true); }
+    for(const part of entity.parts){
+      if(entity.frozen){
+        const massData={mass:0,center:Vec2(),I:0};part.body.getMassData(massData);
+        this.frozenMotion.set(part,{type:part.body.getType(),velocity:{...part.body.getLinearVelocity()},angularVelocity:part.body.getAngularVelocity(),massData});
+        part.frozenMass=massData.mass>0?massData.mass:part.nativeMass??0;if(massData.mass>0)part.nativeMass=massData.mass;part.body.setType('static');
+      }else{
+        const motion=this.frozenMotion.get(part);part.body.setType(motion?.type??part.initialType??'dynamic');
+        if(motion){if(part.body.isDynamic()&&motion.massData.mass>0)part.body.setMassData(motion.massData);part.body.setLinearVelocity(motion.velocity);part.body.setAngularVelocity(motion.angularVelocity);}
+        this.frozenMotion.delete(part);delete part.frozenMass;
+      }part.body.setAwake(true);
+    }
   }
   rotate(entity: Entity, angle: number) {
     if(!entity.parts.length){entity.angle=(entity.angle??0)+angle;return;}
@@ -214,7 +256,12 @@ export class Simulation {
     }
   }
   serialize(): SceneData {
-    const save=(e:Entity):SavedEntity=>({kind:e.kind,frozen:e.frozen,...(e.rig?{rig:e.rig}:{}),...(e.catalogId?{catalogId:e.catalogId,prefabId:e.prefabId,position:e.position,angle:e.angle,activeJointIds:[...(e.jointById??new Map()).keys()]}:{}),systems:Object.fromEntries([...this.stateAdapters].map(([name,a])=>[name,a.capture(e)]).filter(([,value])=>value!==undefined)),parts:e.parts.map(p=>({...(p.id?{id:p.id}:{}),x:p.body.getPosition().x,y:p.body.getPosition().y,angle:p.body.getAngle(),vx:p.body.getLinearVelocity().x,vy:p.body.getLinearVelocity().y,av:p.body.getAngularVelocity()}))});
+    const savePart=(part:Part):SavedEntity['parts'][number]=>{
+      const frozen=this.frozenMotion.get(part),massData=frozen?.massData??{mass:0,center:Vec2(),I:0};if(!frozen)part.body.getMassData(massData);
+      const velocity=frozen?.velocity??part.body.getLinearVelocity();
+      return {...(part.id?{id:part.id}:{}),x:part.body.getPosition().x,y:part.body.getPosition().y,angle:part.body.getAngle(),vx:velocity.x,vy:velocity.y,av:frozen?.angularVelocity??part.body.getAngularVelocity(),mass:massData.mass>0?massData.mass:this.massFor(part),inertia:massData.I,center:{...massData.center}};
+    };
+    const save=(e:Entity):SavedEntity=>({kind:e.kind,frozen:e.frozen,...(e.rig?{rig:e.rig}:{}),...(e.destroyedNodeIds?.size?{destroyedNodeIds:[...e.destroyedNodeIds]}:{}),...(e.catalogId?{catalogId:e.catalogId,prefabId:e.prefabId,position:e.position,angle:e.angle,activeJointIds:[...(e.jointById??new Map()).keys()]}:{}),systems:Object.fromEntries([...this.stateAdapters].map(([name,a])=>[name,a.capture(e)]).filter(([,value])=>value!==undefined)),parts:e.parts.map(savePart)});
     return {format:'open-playground',version:2,buildId:this.assets?.buildId??null,...(this.environment?{environment:save(this.environment)}:{}),systems:Object.fromEntries([...this.sceneAdapters].map(([name,adapter])=>[name,adapter.capture(this.renderEntities)])),entities:this.entities.map(save)};
   }
   import(value: unknown) {
@@ -228,16 +275,21 @@ export class Simulation {
     const expected = { human: 11, box: 1, ball: 1, plank: 1 };
     for (const e of savedEntities) {
       if(!e||!Array.isArray(e.parts)||e.parts.length>1000||typeof e.frozen!=='boolean')throw new Error('Invalid scene object');
+      if(e.destroyedNodeIds!==undefined&&(!Array.isArray(e.destroyedNodeIds)||e.kind!=='prefab'&&e.destroyedNodeIds.length>0))throw new Error('Invalid destroyed scene node');
       if(e.systems!==undefined&&(!e.systems||typeof e.systems!=='object'||Array.isArray(e.systems)||Object.keys(e.systems).some(name=>!this.stateAdapters.has(name))))throw new Error('Scene requires an unavailable simulation system');
       if(e.kind==='prefab'){
         const prefab=this.assets?.prefabs.get(e.catalogId??'');
         if(!prefab||e.prefabId!==(prefab.id??prefab.rootGameObjectId)||e.parts.length!==prefab.parts.length)throw new Error('Invalid scene prefab');
+        if(e.destroyedNodeIds!==undefined&&(!Array.isArray(e.destroyedNodeIds)||new Set(e.destroyedNodeIds).size!==e.destroyedNodeIds.length||e.destroyedNodeIds.some(id=>typeof id!=='string'||!prefab.nodes.some(n=>n.id===id&&n.parentId!==null))))throw new Error('Invalid destroyed scene node');
         if(e.parts.some((p,i)=>p.id!==prefab.parts[i].id))throw new Error('Scene body identifiers do not match the prefab');
-        if(e.activeJointIds!==undefined&&(!Array.isArray(e.activeJointIds)||new Set(e.activeJointIds).size!==e.activeJointIds.length||e.activeJointIds.some(id=>!prefab.joints.some(j=>j.id===id&&j.enabled!==false))))throw new Error('Invalid scene joint identifiers');
+        if(e.activeJointIds!==undefined&&(!Array.isArray(e.activeJointIds)||new Set(e.activeJointIds).size!==e.activeJointIds.length||e.activeJointIds.some(id=>!prefab.joints.some(j=>j.id===id&&j.enabled!==false)&&!this.generatedJointIds?.(prefab).has(id))))throw new Error('Invalid scene joint identifiers');
         if(!e.position||![e.position.x,e.position.y,e.angle].every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<1e7))throw new Error('Invalid scene coordinates');
       }else if(!kinds.includes(e.kind)||(e.rig!==undefined&&e.rig!=='local')||e.parts.length!==(e.kind==='human'&&e.rig==='local'?14:expected[e.kind]))throw new Error('Invalid scene object');
       if(e.rig==='local'&&!this.humanRig)throw new Error('This scene needs local game assets. Run the extraction script first.');
-      for (const p of e.parts) if (!p || (['x','y','angle','vx','vy','av'] as const).some(k => typeof p[k] !== 'number' || !Number.isFinite(p[k]) || Math.abs(p[k]) > 1e7)) throw new Error('Invalid scene coordinates');
+      for(const p of e.parts){
+        if(!p||(['x','y','angle','vx','vy','av'] as const).some(k=>typeof p[k]!=='number'||!Number.isFinite(p[k])||Math.abs(p[k])>1e7))throw new Error('Invalid scene coordinates');
+        if(p.mass!==undefined&&(!Number.isFinite(p.mass)||p.mass<0||p.mass>1e12)||p.inertia!==undefined&&(!Number.isFinite(p.inertia)||p.inertia<0||p.inertia>1e16)||p.center!==undefined&&(!p.center||![p.center.x,p.center.y].every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<1e7)))throw new Error('Invalid scene mass data');
+      }
     }
     const original=[...this.entities],originalEnvironment=this.environment,staged:Entity[]=[];let stagedEnvironment:Entity|undefined;
     const previousGlobals=[...this.importTransactions.values()].map(adapter=>({adapter,value:adapter.capture()}));
@@ -250,8 +302,13 @@ export class Simulation {
       for(const saved of savedEntities){
         const e=saved.kind==='prefab'?this.spawnPrefab(saved.catalogId!,saved.position!.x,saved.position!.y):this.spawn(saved.kind,0,0,saved.rig==='local');staged.push(e);e.angle=saved.angle??0;
         if(saved===data.environment){e.isEnvironment=true;stagedEnvironment=e;this.entities=this.entities.filter(other=>other!==e);}
-        saved.parts.forEach((p,i)=>{e.parts[i].body.setTransform(Vec2(p.x,p.y),p.angle);e.parts[i].body.setLinearVelocity(Vec2(p.vx,p.vy));e.parts[i].body.setAngularVelocity(p.av);});if(saved.frozen)this.freeze(e);
+        saved.parts.forEach((p,i)=>{
+          const part=e.parts[i];part.body.setTransform(Vec2(p.x,p.y),p.angle);
+          if(p.mass!==undefined){part.nativeMass=p.mass;if(part.body.isDynamic()&&p.mass>0){const md={mass:0,center:Vec2(),I:0};part.body.getMassData(md);part.body.setMassData({mass:p.mass,center:p.center??md.center,I:p.inertia??md.I*p.mass/Math.max(md.mass,Number.EPSILON)});}}
+          part.body.setLinearVelocity(Vec2(p.vx,p.vy));part.body.setAngularVelocity(p.av);
+        });if(saved.frozen)this.freeze(e);
         this.onSpawn.forEach(fn=>fn(e));
+        for(const id of saved.destroyedNodeIds??[])this.destroyNode(e,id);
         for(const [name,state] of Object.entries(saved.systems??{}))if(this.stateAdapters.get(name)!.restore(e,state)===false)throw new Error(`Invalid ${name} simulation state`);
         if(saved.activeJointIds&&e.jointById)for(const [id,joint] of e.jointById)if(!saved.activeJointIds.includes(id)){this.world.destroyJoint(joint);this.breakableJoints.delete(joint);e.joints=e.joints.filter(j=>j!==joint);e.jointById.delete(id);}
       }

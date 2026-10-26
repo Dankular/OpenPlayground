@@ -2,6 +2,7 @@ import { AABB, Vec2, type Body, type Fixture, type World } from 'planck';
 import type { Entity, Part } from '../simulation';
 import type { PhysicalSystem } from './physical-world';
 import { sourceComponent } from './physical-world';
+import {fixtureLayer as sourceFixtureLayer} from './targeting';
 
 export interface Cartridge { Damage: number; Recoil: number; ImpactForce: number; StartSpeed: number; PenetrationRandomAngleMultiplier: number }
 export interface BulletHit { part: Part; point: { x: number; y: number }; normal: { x: number; y: number }; damage: number; exit?: boolean }
@@ -28,6 +29,8 @@ export class BallisticsSystem {
   constructor(readonly world: World, readonly physical: PhysicalSystem, readonly options: {
     onHit?: (hit: BulletHit) => void; onTrace?: (trace: BulletTrace) => void;
     random?: () => number;
+    maxBallisticsIterations?:number;maxTotalDistance?:number;ricochetChanceMultiplier?:number;
+    renderTracers?:boolean;layersToHit?:number;fixtureLayer?:(fixture:Fixture)=>number;
   } = {}) {}
   attach(entity: Entity): void { for (const part of entity.parts) this.byBody.set(part.body, { part, entity }); }
   remove(entity: Entity): void {
@@ -44,16 +47,17 @@ export class BallisticsSystem {
   rayCast(owner: Entity, start: { x: number; y: number }, end: { x: number; y: number }): { fixture: Fixture; point: Vec2; normal: Vec2; fraction: number } | null {
     let closest: { fixture: Fixture; point: Vec2; normal: Vec2; fraction: number } | null = null;
     this.world.rayCast(start, end, (fixture, point, normal, fraction) => {
-      if (fixture.isSensor() || this.byBody.get(fixture.getBody())?.entity === owner) return -1;
+      if (fixture.isSensor() || this.byBody.get(fixture.getBody())?.entity === owner||!this.layerMatches(fixture)) return -1;
       closest = { fixture, point: Vec2(point), normal: Vec2(normal), fraction }; return fraction;
     });
     return closest;
   }
+  private layerMatches(fixture:Fixture):boolean {return this.options.layersToHit===undefined||!!(this.options.layersToHit&(1<<(this.options.fixtureLayer??sourceFixtureLayer)(fixture)));}
   private pointFixture(bullet: Bullet): Fixture | null {
     let selected: Fixture | null = null;
     const p = bullet.origin;
     this.world.queryAABB(new AABB(Vec2(p.x - .001, p.y - .001), Vec2(p.x + .001, p.y + .001)), fixture => {
-      if (!fixture.isSensor() && this.byBody.get(fixture.getBody())?.entity !== bullet.owner && fixture.testPoint(p)) { selected = fixture; return false; }
+      if (!fixture.isSensor() && this.layerMatches(fixture)&&this.byBody.get(fixture.getBody())?.entity !== bullet.owner && fixture.testPoint(p)) { selected = fixture; return false; }
       return true;
     });
     return selected;
@@ -73,7 +77,7 @@ export class BallisticsSystem {
   step(dt: number): void {
     this.bullets = this.bullets.filter(bullet => {
       if (bullet.wait > 0) { bullet.wait -= dt; if (bullet.wait > 0) return true; }
-      while (bullet.iterations < 128 && bullet.distance < 1000) {
+      while (bullet.iterations < (this.options.maxBallisticsIterations??128) && bullet.distance < (this.options.maxTotalDistance??1000)) {
         const ratio = clamp(bullet.speed / bullet.cartridge.StartSpeed, .05, 1) / Math.max(.1, Math.sqrt(bullet.distance * .2));
         if (ratio <= .1) return false;
         const inside = this.pointFixture(bullet);
@@ -97,7 +101,7 @@ export class BallisticsSystem {
           if (!bullet.traversal) return false;
           const travel = Math.min(bullet.maxRange, dt * 60 * bullet.maxRange * Math.sqrt(ratio));
           const end = Vec2.add(bullet.origin, Vec2.mul(bullet.direction, travel));
-          this.options.onTrace?.({ start: Vec2(bullet.origin), end, lifetime: .06 });
+          if(this.options.renderTracers!==false)this.options.onTrace?.({ start: Vec2(bullet.origin), end, lifetime: .06 });
           const drop = (1 - Math.pow(.999, dt * 60)) * .25 * .7;
           bullet.direction = norm(Vec2(bullet.direction.x * (1 - drop), bullet.direction.y * (1 - drop) - drop));
           bullet.origin.add(Vec2.mul(bullet.direction, travel)); bullet.distance += travel * .1;
@@ -111,11 +115,11 @@ export class BallisticsSystem {
           damage: bullet.cartridge.Damage * bulletDamageMultiplier(bullet.distance + distance) * clamp(ratio, 0, 1) });
         const physical = this.physical.get(target.part);
         if (physical) physical.state.charge = Math.max(bullet.charge * physical.settings.EnergyWireResistance, physical.state.charge);
-        this.options.onTrace?.({ start: Vec2(bullet.origin), end: hit.point, lifetime: .06 });
+        if(this.options.renderTracers!==false)this.options.onTrace?.({ start: Vec2(bullet.origin), end: hit.point, lifetime: .06 });
         const properties = this.material(target.part), soft = clamp(Number(properties.Softness ?? 0) + Number(properties.Brittleness ?? 0), 0, 1);
         const chance = 1 - (soft * 150 + Math.abs(Vec2.dot(hit.normal, bullet.direction)));
         bullet.distance += distance; bullet.iterations++;
-        if (chance > .05 && chance > (this.options.random ?? Math.random)()) {
+        if (chance > .05 && chance*(this.options.ricochetChanceMultiplier??1) > (this.options.random ?? Math.random)()) {
           const reflected = Vec2.sub(bullet.direction, Vec2.mul(hit.normal, 2 * Vec2.dot(bullet.direction, hit.normal)));
           bullet.direction = norm(Vec2.add(reflected, this.noise(bullet.cartridge.PenetrationRandomAngleMultiplier * .1)));
           bullet.origin = Vec2.sub(hit.point, Vec2.mul(hit.normal, .02));

@@ -24,11 +24,11 @@ bugs observed in a running native comparison.
 
 | Area | Source examples | Missing work |
 | --- | --- | --- |
-| Vehicles | CarBehaviour (6), HovercarBehaviour, BoatMotorBehaviour, TankBarrelBehaviour | Drive, brake, steering, motor and turret controllers; vehicle damage presentation |
-| Mechanisms | PistonBehaviour (2), MotorisedHingeBehaviour, GearBehaviour | Source controls, force limits and activation behavior |
+| Vehicles | CarBehaviour (6), HovercarBehaviour, BoatMotorBehaviour, TankBarrelBehaviour | Source drive/brake/reverse/hover/boat controllers now implemented; native tank projectile instantiation, cosmetic/audio effects and solver replay remain |
+| Mechanisms | PistonBehaviour (2), MotorisedHingeBehaviour, GearBehaviour | Piston/servo source controllers now implemented; gear update is a native obsolete no-op; native solver/audio comparison remains |
 | Sensors/logic | DetectorBehaviour (6), GateBehaviour, TimedGateBehaviour, LaserReceiverBehaviour | Detection filters, signal timing and usable connection tools |
-| Specialized weapons | ProjectileLauncherBehaviour (8), RocketLauncherBehaviour (2), BeamCannonBehaviour, LaserBehaviour (2) | Spawned projectiles, guided/explosive/beam behavior and their effects |
-| Liquids beyond syringes | LiquidPumpBehaviour, LiquidPressureValveBehaviour, LiquidOutletBehaviour, LiquidDuplicatorBehaviour, FlaskBehaviour (8) | Complete pressure network and container controllers, leaks, mixing and reactions |
+| Specialized weapons | ProjectileLauncherBehaviour (8), RocketLauncherBehaviour (2), BeamCannonBehaviour, LaserBehaviour (2) | Native projectile/rocket families, ion/stun bolts and Javelin now implemented; beam/laser families, remaining effects, exact guidance and native replay remain |
+| Liquids beyond syringes | LiquidPumpBehaviour, LiquidPressureValveBehaviour, LiquidOutletBehaviour, LiquidDuplicatorBehaviour, FlaskBehaviour (8) | Pressure, valves, duplication, identification, drains/leaks and Bottle transfer now implemented; full particle deposition, advanced chemistry and medical monitor/bypass endpoints remain |
 | Attachments | FirearmAttachmentPointBehaviour (30), FlashlightAttachmentBehaviour | Attachment manipulation and actual effects on weapons |
 | Destruction | DestroyableBehaviour (14), ShatteredObjectGenerator (24), BreakJointOnShotBehaviour (25) | Native debris, shattering, removal and specialized break triggers |
 | Rendering/effects | GlowingHotMetalBehaviour (35), ColorWave (56), BurnableSpriteBehaviour (63) | Native materials, animation, particles and environment lighting |
@@ -36,6 +36,7 @@ bugs observed in a running native comparison.
 
 Existing ragdoll, physical, firearm, explosive, environmental and wire adapters
 also have documented fidelity boundaries. Native runtime comparisons remain
-necessary before any subsystem can be called equivalent. The standalone wire
-kernel alone does not establish that its connection tools or scene persistence
-are complete.
+necessary before any subsystem can be called equivalent. Connection tools,
+renderer and scene persistence are being integrated with the wire kernel. Native
+pin tools, all source materials and solver/timing comparisons remain obligations
+even when a browser connection can be placed and saved.

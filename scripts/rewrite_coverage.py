@@ -31,6 +31,15 @@ for syringe_class in (
     BOUNDARIES[syringe_class] = ("src/systems/liquids.ts", "source reservoirs/pressure/lodging/liquid effects; presentation and native equivalence incomplete")
 for container_class in ("FlaskBehaviour", "LiquidCanisterBehaviour", "BloodTankBehaviour"):
     BOUNDARIES[container_class] = ("src/systems/liquids.ts", "reservoir/source state; full controller/network presentation incomplete")
+BOUNDARIES["LiquidPumpBehaviour"] = ("src/systems/liquids.ts", "pressure-only pump/modes/vibration/snapshot; native display/audio comparison incomplete")
+for liquid_device_class in ("ValveBehaviour", "LiquidPressureValveBehaviour", "LiquidDuplicatorBehaviour", "LiquidOutletBehaviour", "LiquidentifierBehaviour", "LiquidFilterBehaviour", "LiquidContainerLeakingBehaviour", "LiquidContainerHoleBehaviour", "PointLiquidTransferBehaviour"):
+    BOUNDARIES[liquid_device_class] = ("src/systems/liquid-devices.ts", "source liquid controller/pressure/drain/transfer state; particle deposition and native presentation incomplete")
+for mechanism_class in ("PistonBehaviour", "MotorisedHingeBehaviour", "GearBehaviour"):
+    BOUNDARIES[mechanism_class] = ("src/systems/mechanisms.ts", "source piston/servo rules and native obsolete gear no-op; solver/presentation equivalence unverified")
+for vehicle_class in ("CarBehaviour", "HovercarBehaviour", "BoatMotorBehaviour", "TankBarrelBehaviour", "AutomaticWheelJointCreator"):
+    BOUNDARIES[vehicle_class] = ("src/systems/vehicles.ts", "source controllers/generated wheels; native projectile/presentation/solver gaps remain")
+for projectile_class in ("ProjectileLauncherBehaviour", "RocketLauncherBehaviour", "ProjectileBehaviour", "LaunchedRocketBehaviour", "MachineGunProjectileBehaviour", "StunnerBehaviour", "IonBoltBehaviour", "JavelinMissileBehaviour", "DeleteAfterTime", "PointToVelocityBehaviour"):
+    BOUNDARIES[projectile_class] = ("src/systems/projectiles.ts", "native resource launch/movement/impact/lifetime controllers; source FX, ownership and native replay boundaries documented")
 
 def main():
     root = Path(__file__).resolve().parents[1]

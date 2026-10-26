@@ -1,14 +1,19 @@
 import * as THREE from 'three';
+import {createNativeSpriteMaterial} from './particles';
 import { type Entity, type Part, Simulation } from './simulation';
 import { BodyShaderLibrary,updateBodyMaterial,type BodySprite } from './shaders/body';
 import type { SkinUniforms } from './systems/skin';
 import type {PrefabRenderer} from './prefabs';
 import {SyringeShaderLibrary,updateSyringeMaterial,type SyringeVisualState} from './shaders/syringe';
+import {ConnectionRenderer} from './wire-view';
 
 export class SandboxRenderer {
   scene = new THREE.Scene();
   camera = new THREE.OrthographicCamera(-10, 10, 7, -7, .1, 100);
   renderer: THREE.WebGLRenderer;
+  private linearTarget:THREE.WebGLRenderTarget;
+  private outputScene=new THREE.Scene();
+  private outputCamera=new THREE.Camera();
   center = new THREE.Vector2(0, 4);
   viewHeight = 12;
   private visuals = new Map<Part, THREE.Group>();
@@ -26,9 +31,15 @@ export class SandboxRenderer {
   private resizeObserver: ResizeObserver;
   private selection = new THREE.Box3Helper(new THREE.Box3(), 0x9dda7a);
   private fallbackObjects: THREE.Object3D[]=[];
+  connections:ConnectionRenderer;
   constructor(readonly container: HTMLElement, readonly simulation: Simulation, readonly bodyShaders:BodyShaderLibrary|null=null) {
-    this.syringeShaders=new SyringeShaderLibrary(bodyShaders?.projectColorSpace!==0);
+    if(bodyShaders)bodyShaders.outputLinear=true;
+    this.syringeShaders=new SyringeShaderLibrary(bodyShaders?.projectColorSpace!==0,true);
+    this.connections=new ConnectionRenderer(this.scene);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.linearTarget=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,colorSpace:THREE.LinearSRGBColorSpace,depthBuffer:true,samples:Math.min(4,this.renderer.capabilities.maxSamples)});
+    const outputMaterial=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,toneMapped:false,uniforms:{sceneTexture:{value:this.linearTarget.texture}},vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.0,1.0);}',fragmentShader:'uniform sampler2D sceneTexture;varying vec2 vUv;void main(){gl_FragColor=texture2D(sceneTexture,vUv);\n#include <colorspace_fragment>\n}'});
+    this.outputScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),outputMaterial));
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setClearColor(0x20252b);
     container.append(this.renderer.domElement);
@@ -55,6 +66,7 @@ export class SandboxRenderer {
   resize() {
     const w = this.container.clientWidth, h = this.container.clientHeight;
     this.renderer.setSize(w,h);
+    const pixels=this.renderer.getDrawingBufferSize(new THREE.Vector2());this.linearTarget.setSize(pixels.x,pixels.y);
     const halfW = this.viewHeight * w / Math.max(h, 1) / 2;
     this.camera.left = -halfW; this.camera.right = halfW;
     this.camera.top = this.viewHeight / 2; this.camera.bottom = -this.viewHeight / 2;
@@ -128,13 +140,13 @@ export class SandboxRenderer {
     this.visuals.set(part,g);
     return g;
   }
-  private spriteMesh(s:NonNullable<Part['sprite']>,nativeMaterial:THREE.Material|null=null) {
+  private spriteMesh(s:NonNullable<Part['sprite']>,nativeMaterial:THREE.Material|null=null,rendererKey?:string) {
     let material=nativeMaterial;
     if(!material){
       let texture=this.textures.get(s.url);
       if(!texture){texture=this.textureLoader.load(`${import.meta.env.BASE_URL}${s.url.replace(/^\//,'')}`);texture.magFilter=THREE.NearestFilter;texture.minFilter=THREE.NearestFilter;texture.colorSpace=THREE.SRGBColorSpace;this.textures.set(s.url,texture);}
-      const basic=new THREE.MeshBasicMaterial({map:texture,transparent:true,alphaTest:.01,depthWrite:false,opacity:s.color?.a??1,color:s.color?new THREE.Color(s.color.r,s.color.g,s.color.b):0xffffff});
-      basic.userData.sourceColor=basic.color.clone();material=basic;
+      material=rendererKey?createNativeSpriteMaterial(rendererKey,texture,s.color):null;
+      if(!material){const basic=new THREE.MeshBasicMaterial({map:texture,transparent:true,alphaTest:.01,depthWrite:false,opacity:s.color?.a??1,color:s.color?new THREE.Color(s.color.r,s.color.g,s.color.b):0xffffff});basic.userData.sourceColor=basic.color.clone();material=basic;}
     }
     const mesh=new THREE.Mesh(new THREE.PlaneGeometry(s.width,s.height),material);
     mesh.position.set((.5-s.pivot.x)*s.width*(s.flipX?-1:1),(.5-s.pivot.y)*s.height*(s.flipY?-1:1),0);mesh.scale.set(s.flipX?-1:1,s.flipY?-1:1,1);mesh.renderOrder=(s.sortingLayer??0)*1000+(s.sortingOrder??0);return mesh;
@@ -161,15 +173,19 @@ export class SandboxRenderer {
       for(const r of e.renderers??[]){
         if(!r.sprite)continue;
         const node=e.metadata?.nodes.find(n=>n.id===r.nodeId);
-        let g=groups.get(r.id);const active=node?.active!==false;const enabled=(this.rendererOverrides.get(e)?.get(r.id)??(r.enabled!==false&&active))&&!this.rendererDisabled?.(e,r);if(!enabled){if(g)g.visible=false;continue;}
+        let g=groups.get(r.id);const active=node?.active!==false;const enabled=active&&(this.rendererOverrides.get(e)?.get(r.id)??r.enabled!==false)&&!this.rendererDisabled?.(e,r);if(!enabled){if(g)g.visible=false;continue;}
         if(!g){
           const source=node?.components.find(c=>c.type==='SpriteRenderer');
           const pointer=(source?.data.m_Materials as {m_FileID:number;m_PathID:number}[]|undefined)?.[0];
           const part=e.parts.find(p=>p.id===r.bodyId);
           const material=part&&this.syringeFor?.(part)?this.syringeShaders.create(r.sprite as BodySprite):pointer?.m_FileID===0?this.bodyShaders?.create({materialKey:`${source?.file??'sharedassets0.assets'}:${pointer.m_PathID}`,sprite:r.sprite as BodySprite,nativeScale:node?.scale,bodyOffset:r.position})??null:null;
-          g=new THREE.Group();g.add(this.spriteMesh(r.sprite,material));groups.set(r.id,g);this.scene.add(g);
+          g=new THREE.Group();g.add(this.spriteMesh(r.sprite,material,`${source?.file??'sharedassets0.assets'}:${r.id}`));groups.set(r.id,g);this.scene.add(g);
         }
         g.visible=true;
+        const spritePlane=g.children[0] as THREE.Mesh;
+        const dimensions=spritePlane.userData.dimensions as {width:number;height:number}|undefined;
+        if(!dimensions||dimensions.width!==r.sprite.width||dimensions.height!==r.sprite.height){spritePlane.geometry.dispose();spritePlane.geometry=new THREE.PlaneGeometry(r.sprite.width,r.sprite.height);spritePlane.userData.dimensions={width:r.sprite.width,height:r.sprite.height};}
+        spritePlane.position.set((.5-r.sprite.pivot.x)*r.sprite.width*(r.sprite.flipX?-1:1),(.5-r.sprite.pivot.y)*r.sprite.height*(r.sprite.flipY?-1:1),0);spritePlane.scale.set(r.sprite.flipX?-1:1,r.sprite.flipY?-1:1,1);
         const part=e.parts.find(p=>p.id===r.bodyId),body=part?.body;
         const state=part?this.physicalState?.(part):undefined;
         g.traverse(child=>{if(child instanceof THREE.Mesh){const m=child.material as THREE.Material;if(m.userData.nativeBodyShader){updateBodyMaterial(m,part?this.skinFor?.(part):undefined,this.skinTime?.()??0);}else if(m.userData.nativeSyringeShader){updateSyringeMaterial(m,part?this.syringeFor?.(part):undefined,this.skinTime?.()??0);}else if(state&&m instanceof THREE.MeshBasicMaterial&&m.userData.sourceColor){m.color.copy(m.userData.sourceColor).multiplyScalar(1-.8*THREE.MathUtils.clamp(state.burnProgress,0,1));const glow=THREE.MathUtils.clamp((state.temperature-300)/1200,0,.75);if(glow>0)m.color.lerp(new THREE.Color(0xff6b2c),glow);}}});
@@ -180,6 +196,11 @@ export class SandboxRenderer {
     });
     this.selection.visible=!!selected&&!bounds.isEmpty();
     if(this.selection.visible) { bounds.expandByScalar(.07); this.selection.box.copy(bounds); this.selection.updateMatrixWorld(true); }
-    this.renderer.render(this.scene,this.camera);
+    this.connections.render(this.skinTime?.()??0,this.viewHeight/Math.max(1,this.container.clientHeight));
+    // Three's installed WebGLPrograms selects LinearSRGB output for render
+    // targets. Built-in and particle shaders therefore retain linear radiance
+    // through blending; only this final fullscreen pass encodes display RGB.
+    this.renderer.setRenderTarget(this.linearTarget);this.renderer.render(this.scene,this.camera);
+    this.renderer.setRenderTarget(null);this.renderer.render(this.outputScene,this.outputCamera);
   }
 }

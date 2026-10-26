@@ -3,6 +3,7 @@ import type { Entity, Part } from '../simulation';
 import type { SourceComponent } from '../prefabs';
 import type { PhysicalSystem } from './physical-world';
 import { getCharge, getHeatCapacity } from './physical';
+import {targetsPart} from './targeting';
 
 export const DEVICE_HANDLERS = ['GeneratorBehaviour', 'HeatingElementBehaviour', 'HoverboxBehaviour', 'RotorBehaviour', 'IonThrusterBehaviour'] as const;
 type DeviceKind = typeof DEVICE_HANDLERS[number];
@@ -41,9 +42,10 @@ export class DeviceSystem {
   }
   remove(entity: Entity): void { this.states.delete(entity); }
   get(entity: Entity): readonly DeviceState[] { return this.states.get(entity) ?? []; }
-  use(entity: Entity, channel = 0): boolean {
+  use(entity: Entity, channel = 0,targetPart?:Part): boolean {
     let changed = false;
     for (const device of this.states.get(entity) ?? []) {
+      if(!targetsPart(entity,device.part,targetPart))continue;
       if (this.options.isDestroyed?.(device.part) || this.options.isDisabled?.(entity, device.component)) continue;
       if (device.kind === 'RotorBehaviour' && channel === 1) device.speed = -device.speed;
       else { device.active = !device.active; if (device.kind === 'GeneratorBehaviour') device.warmup = 0; }

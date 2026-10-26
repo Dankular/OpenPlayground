@@ -31,12 +31,12 @@ out vec2 vs_TEXCOORD0;
 void main(){vs_TEXCOORD0=_SpriteUvRect.xy+uv*_SpriteUvRect.zw;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
 export class SyringeShaderLibrary {
   private loader=new THREE.TextureLoader();private textures=new Map<string,THREE.Texture>();
-  constructor(readonly linearProject=true){}
+  constructor(readonly linearProject=true,public outputLinear=false){}
   create(sprite:BodySprite):THREE.RawShaderMaterial|null {
     const source=sprite.sourceTexture,rect=sprite.uvRect;if(!source||!rect||(sprite.packingRotation??0)!==0)return null;
     let texture=this.textures.get(source.url);
     if(!texture){texture=this.loader.load(`${import.meta.env.BASE_URL}${source.url.replace(/^\//,'')}`);texture.magFilter=THREE.NearestFilter;texture.minFilter=THREE.NearestFilter;texture.generateMipmaps=false;texture.colorSpace=this.linearProject?THREE.SRGBColorSpace:THREE.NoColorSpace;this.textures.set(source.url,texture);}
-    const material=new THREE.RawShaderMaterial({vertexShader:vertex,fragmentShader:adaptSyringeFragment(shaderLab,this.linearProject),glslVersion:THREE.GLSL3,transparent:true,depthWrite:false,side:THREE.DoubleSide,toneMapped:false,uniforms:{_MainTex:{value:texture},_SpriteUvRect:{value:new THREE.Vector4(rect.x,rect.y,rect.width,rect.height)},_Time:{value:new THREE.Vector4()},_LiquidColour:{value:new THREE.Vector4(0,0,0,0)},_Direction:{value:0},_CutoffA:{value:floats._CutoffA},_CutoffB:{value:floats._CutoffB}}});
+    const material=new THREE.RawShaderMaterial({vertexShader:vertex,fragmentShader:adaptSyringeFragment(shaderLab,this.linearProject&&!this.outputLinear),glslVersion:THREE.GLSL3,transparent:true,depthWrite:false,side:THREE.DoubleSide,toneMapped:false,uniforms:{_MainTex:{value:texture},_SpriteUvRect:{value:new THREE.Vector4(rect.x,rect.y,rect.width,rect.height)},_Time:{value:new THREE.Vector4()},_LiquidColour:{value:new THREE.Vector4(0,0,0,0)},_Direction:{value:0},_CutoffA:{value:floats._CutoffA},_CutoffB:{value:floats._CutoffB}}});
     material.name='Native syringe liquid mask';material.userData.nativeSyringeShader=true;material.userData.linearProject=this.linearProject;return material;
   }
 }

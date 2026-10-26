@@ -14,6 +14,10 @@ their needle is lodged, and apply serum/poison effects through circulation.
 Broken nonempty syringes also dose nearby organic limbs. Original gunshot
 and material-impact audio loads on demand. Controls include grabbing/throwing,
 freeze/delete/rotate, pause/step, slow motion, camera navigation and scene saves.
+Connection tools provide electrical, heat, activation, blood, rope, cable, rigid,
+fixed, spring, chain and bandage links. Source piston/servo, vehicle controls and
+liquid-device controllers are implemented, alongside eleven recovered resource
+projectile prefabs and their launcher/impact behaviors.
 
 **This is not yet a complete rewrite or a verified equivalent of the native
 game.** The catalogue references 238 distinct script classes; many still need
@@ -78,6 +82,8 @@ hash-verified exports when rerunning the full extractor. The smaller
 | Choose an object | Library card or 1–4 |
 | Place object | Left click the chamber |
 | Interact tool | V or Escape |
+| Create connections | W; choose a type, then click two points or drag |
+| Remove connections | X or select a link and Delete |
 | Grab/throw | Left drag in Interact mode |
 | Pan / zoom | Right or middle drag / wheel |
 | Pause / step | Space / . |
@@ -85,6 +91,7 @@ hash-verified exports when rerunning the full extractor. The smaller
 | Activate / fire selected object | T; hold for supported automatic firearms |
 | Temperature, charge, fire and pose | Selected-object panel |
 | Syringe pressure / infinite source | Selected-syringe controls; T cycles push/pull |
+| Vehicle engine, parking brake, reverse / servo target | Selected-object controls |
 | Rotate selection | Q / E, in 15° increments |
 | Reset camera | Home |
 | Find an object | / |
@@ -98,6 +105,9 @@ evidence. See [research/FINDINGS.md](research/FINDINGS.md) for provenance, evide
 IDs, recovered parameters, approximations and remaining work. Further details:
 [ragdolls](research/RAGDOLL.md), [physical systems](research/PHYSICAL.md),
 [environment](research/ENVIRONMENT.md), [liquids and syringes](research/LIQUIDS.md).
+[connections](research/CONNECTIONS.md), [mechanisms](research/MECHANISMS.md),
+[vehicles](research/VEHICLES.md), [liquid devices](research/LIQUID-DEVICES.md),
+[projectiles](research/PROJECTILES.md), [explosions](research/EXPLOSIONS.md).
 See the [runtime gap inventory](research/FEATURE-GAPS.md) and
 [machinery/defibrillator notes](research/MACHINERY.md) for current repair scope.
 `scripts/rewrite_coverage.py` writes an explicit incomplete-behavior ledger to
@@ -114,5 +124,10 @@ body/joint identity and implemented system state; legacy browser saves remain
 loadable. They are not native game contraption files.
 
 The original installation and generated extraction archive are not committed.
-The focused syringe shader/material sources used by the browser adapter are
-included under `src/shaders/source` so production builds are reproducible.
+Focused syringe shader/material sources are included under `src/shaders/source`.
+The normalized projectile and shrapnel configuration bundles under `src/generated`
+make production builds reproducible without uploading the extraction archive.
+Recreate them for a changed source build with `scripts/extract_projectile_prefabs.py`
+and `scripts/extract_shrapnel.py`, passing `--game-root` and the installed game
+directory. Provenance and extraction commands are documented in
+[PROJECTILE-ASSETS.md](research/PROJECTILE-ASSETS.md).
