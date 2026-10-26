@@ -27,6 +27,8 @@ const FLAME = new Set<number>([PT.FIRE, PT.PLSM, PT.LAVA, PT.CFLM, PT.EMBR]);
 /** Newtons per (pressure unit per cell) per square metre. OpenPlayground heuristic, not derived from either game. */
 export const PRESSURE_FORCE = 40;
 
+/** Brush ids at or above this paint LIFE with the ruleset index `id - GOL_BRUSH`. */
+export const GOL_BRUSH = 1000;
 export class PowderWorld {
   readonly sim: PowderSim;
   readonly pixel: number;
@@ -81,7 +83,7 @@ export class PowderWorld {
   }
 
   // ---- painting --------------------------------------------------------------------------------------------------------
-  /** Brush: element id (PT.*), 'erase', or 'wall'. Radius is in pixels. Returns number of changed pixels. */
+  /** Brush: element id (PT.*), GOL_BRUSH + n for the n-th built-in Game of Life ruleset, 'erase', or 'wall'. Radius is in pixels. Returns number of changed pixels. */
   paint(x: number, y: number, what: number | 'erase' | 'wall' | 'unwall', radius = 3): number {
     const c = this.worldToPixel(x, y), sim = this.sim;
     let n = 0;
@@ -93,8 +95,8 @@ export class PowderWorld {
       if (what === 'erase') { if (sim.at(px, py) || sim.photons[py * sim.XRES + px]) { sim.deletePart(px, py); n++; } }
       else if (what === 'wall' || what === 'unwall') {
         const cx = Math.floor(px / CELL), cy = Math.floor(py / CELL), w = what === 'wall' ? WL.WALL : WL.ERASE;
-        if (sim.bmap[cy * sim.XCELLS + cx] !== w) { sim.bmap[cy * sim.XCELLS + cx] = w; n++; }
-      } else if (sim.createPart(-2, px, py, what, what === PT.LIGH ? -1 : 0) >= 0) n++;
+        if (sim.bmap[cy * sim.XCELLS + cx] !== w) { sim.bmap[cy * sim.XCELLS + cx] = w; n++; sim.gravWallChanged = true; }
+      } else if (typeof what === 'number' && what >= GOL_BRUSH ? sim.createPart(-2, px, py, PT.LIFE, what - GOL_BRUSH) >= 0 : sim.createPart(-2, px, py, what as number, what === PT.LIGH ? -1 : 0) >= 0) n++;
     }
     return n;
   }
@@ -286,12 +288,16 @@ export class PowderWorld {
     this.clear();
     if (d.origin && Number.isFinite(d.origin.x) && Number.isFinite(d.origin.y)) this.origin = { x: d.origin.x, y: d.origin.y };
     for (let k = 0; k < d.walls.length; k += 2) sim.bmap[d.walls[k]] = d.walls[k + 1];
-    for (const r of d.particles) {
+    // spawn points first, so a stickman loaded before its spawn point does not create a second one at its head
+    const ordered = [...d.particles.filter(r => r[0] === PT.SPAWN || r[0] === PT.SPAWN2), ...d.particles.filter(r => r[0] !== PT.SPAWN && r[0] !== PT.SPAWN2)];
+    for (const r of ordered) {
       const x = Math.round(r[1]), y = Math.round(r[2]);
       const i = sim.createPart(-3, Math.min(sim.XRES - 1, Math.max(0, x)), Math.min(sim.YRES - 1, Math.max(0, y)), r[0]);
       if (i < 0) continue;
       sim.x[i] = r[1]; sim.y[i] = r[2]; sim.vx[i] = r[3]; sim.vy[i] = r[4]; sim.temp[i] = r[5]; sim.life[i] = r[6]; sim.ctype[i] = r[7];
-      sim.tmp[i] = r[8]; sim.tmp2[i] = r[9]; sim.tmp3[i] = r[10]; sim.tmp4[i] = r[11]; sim.flags[i] = r[12];
+      // a FIGH's tmp indexes the fighter table slot that createPart just allocated, so it must not be overwritten
+      if (r[0] !== PT.FIGH) sim.tmp[i] = r[8];
+      sim.tmp2[i] = r[9]; sim.tmp3[i] = r[10]; sim.tmp4[i] = r[11]; sim.flags[i] = r[12];
     }
     return true;
   }

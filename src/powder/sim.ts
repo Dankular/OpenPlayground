@@ -14,8 +14,12 @@ import {
   type ElementDef,
 } from './elements';
 import { BEHAVIORS } from './behaviors';
+import { MAX_FIGHTERS, Player } from './behaviors/stickman';
+import { growLoveLolz, simulateGoL } from './gol';
 import { filtInteract } from './optics';
 import { floodInst } from './behaviors/electronics';
+import { empTrigger } from './behaviors/emp';
+import { NewtonianGravity } from './gravity';
 
 export class Rng {
   private s: number;
@@ -46,6 +50,9 @@ export interface Behavior {
   changeType?: (sim: PowderSim, i: number, x: number, y: number, from: number, to: number) => void;
 }
 
+export interface PortalRecord { type: number; life: number; ctype: number; tmp: number; tmp2: number; tmp3: number; tmp4: number; flags: number; x: number; y: number; vx: number; vy: number; temp: number }
+const emptyRecord = (): PortalRecord => ({ type: 0, life: 0, ctype: 0, tmp: 0, tmp2: 0, tmp3: 0, tmp4: 0, flags: 0, x: 0, y: 0, vx: 0, vy: 0, temp: 0 });
+export function clearRecord(r: PortalRecord): void { Object.assign(r, emptyRecord()); }
 export const GRAV = { VERTICAL: 0, OFF: 1, RADIAL: 2, CUSTOM: 3 } as const;
 export const AIR = { ON: 0, PRESSUREOFF: 1, VELOCITYOFF: 2, OFF: 3, NOUPDATE: 4 } as const;
 const AIR_TSTEPP = 0.3, AIR_TSTEPV = 0.4, AIR_VADV = 0.3, AIR_VLOSS = 0.999, AIR_PLOSS = 0.9999, ADV_DIST = 0.7;
@@ -79,8 +86,24 @@ export class PowderSim {
   vorticityCoeff = 0.1; convection: 'off' | 'legacy' | 'boussinesq' = 'boussinesq';
   aheatEnable: boolean; legacyEnable = false; waterEqualTest = false;
   gravityMode: number = GRAV.VERTICAL; customGravityX = 0; customGravityY = 0;
+  empTriggerCount = 0; empDecor = 0;
   frameCount = 0; currentTick = 0; forceStackingCheck = false;
   elementCount = new Int32Array(PT_NUM); elementRecount = true;
+  /** Portal storage: [channel][direction][slot], a detached particle record (type 0 = free). */
+  portalp: PortalRecord[] = Array.from({ length: 101 * 8 * 80 }, () => emptyRecord());
+  portalSlot(channel: number, dir: number, n: number) { return this.portalp[(channel * 8 + dir) * 80 + n]; }
+  storeRecord(rec: PortalRecord, i: number): void {
+    rec.type = this.type[i]; rec.life = this.life[i]; rec.ctype = this.ctype[i]; rec.tmp = this.tmp[i]; rec.tmp2 = this.tmp2[i]; rec.tmp3 = this.tmp3[i];
+    rec.tmp4 = this.tmp4[i]; rec.flags = this.flags[i]; rec.x = this.x[i]; rec.y = this.y[i]; rec.vx = this.vx[i]; rec.vy = this.vy[i]; rec.temp = this.temp[i];
+  }
+  loadRecord(i: number, rec: PortalRecord): void {
+    this.type[i] = rec.type; this.life[i] = rec.life; this.ctype[i] = rec.ctype; this.tmp[i] = rec.tmp; this.tmp2[i] = rec.tmp2; this.tmp3[i] = rec.tmp3;
+    this.tmp4[i] = rec.tmp4; this.flags[i] = rec.flags; this.x[i] = rec.x; this.y[i] = rec.y; this.vx[i] = rec.vx; this.vy[i] = rec.vy; this.temp[i] = rec.temp;
+  }
+  /** Stickmen state (Simulation::player, player2, fighters). Keyboard control goes through Player.press/release. */
+  player = new Player(); player2 = new Player(); fighters: Player[] = Array.from({ length: MAX_FIGHTERS }, () => new Player()); fighcount = 0;
+  /** Game of Life scratch lists (5 words per cell), frames-per-generation setting and counter; LOVE/LOLZ growth grids. */
+  golCells: Uint32Array; golSpeed = 1; cgol = 0; loveGrid: Uint8Array; lolzGrid: Uint8Array;
   /** wireless channels used by WIFI-like elements */
   wireless = new Int32Array(2 * 101);
 
@@ -93,6 +116,11 @@ export class PowderSim {
     this.XRES = this.XCELLS * CELL; this.YRES = this.YCELLS * CELL; this.NPART = this.XRES * this.YRES;
     const n = this.NPART, nc = this.XCELLS * this.YCELLS;
     this.rng = new Rng(o.seed);
+    this.newton = new NewtonianGravity(this.XCELLS, this.YCELLS);
+    this.pstnTemp = new Int32Array(Math.max(this.XRES, this.YRES));
+    this.golCells = new Uint32Array(this.XRES * this.YRES * 5);
+    const lg = (Math.trunc(this.XRES / 9) + 1) * (Math.trunc(this.YRES / 9) + 1);
+    this.loveGrid = new Uint8Array(lg); this.lolzGrid = new Uint8Array(lg);
     this.type = new Int32Array(n); this.life = new Int32Array(n); this.ctype = new Int32Array(n);
     this.tmp = new Int32Array(n); this.tmp2 = new Int32Array(n); this.tmp3 = new Int32Array(n); this.tmp4 = new Int32Array(n); this.flags = new Int32Array(n);
     this.x = new Float32Array(n); this.y = new Float32Array(n); this.vx = new Float32Array(n); this.vy = new Float32Array(n); this.temp = new Float32Array(n);
@@ -116,7 +144,7 @@ export class PowderSim {
   at(x: number, y: number) { return this.pmap[y * this.XRES + x]; }
   /** Particle type at (x, y), 0 if empty. */
   typeAt(x: number, y: number) { return this.inBounds(x, y) ? TYP(this.pmap[y * this.XRES + x]) : 0; }
-  setWall(cx: number, cy: number, w: number) { this.bmap[cy * this.XCELLS + cx] = w; }
+  setWall(cx: number, cy: number, w: number) { this.bmap[cy * this.XCELLS + cx] = w; this.gravWallChanged = true; }
 
   // ---- particle lifecycle ---------------------------------------------------------------------------------------------
   private allocPart(): number {
@@ -220,6 +248,13 @@ export class PowderSim {
     return np;
   }
 
+  /** Copy every particle field from `src` into `dst` (including type and position, like `parts[p] = parts[q]`). */
+  copyPart(dst: number, src: number): void {
+    this.type[dst] = this.type[src]; this.life[dst] = this.life[src]; this.ctype[dst] = this.ctype[src]; this.tmp[dst] = this.tmp[src];
+    this.tmp2[dst] = this.tmp2[src]; this.tmp3[dst] = this.tmp3[src]; this.tmp4[dst] = this.tmp4[src]; this.flags[dst] = this.flags[src];
+    this.x[dst] = this.x[src]; this.y[dst] = this.y[src]; this.vx[dst] = this.vx[src]; this.vy[dst] = this.vy[src]; this.temp[dst] = this.temp[src];
+  }
+
   deletePart(x: number, y: number): void {
     if (!this.inBounds(x, y)) return;
     const k = y * this.XRES + x, r = this.photons[k] ? this.photons[k] : this.pmap[k];
@@ -231,12 +266,24 @@ export class PowderSim {
     this.active = 0; this.pfree = -1; this.numParts = 0; this.elementCount.fill(0);
     this.bmap.fill(0); this.emap.fill(0);
     this.avx.fill(0); this.avy.fill(0); this.pv.fill(0); this.hv.fill(this.ambientAirTemp);
+    this.newton.clearForces(); this.gravWallChanged = true;
+    for (const r of this.portalp) clearRecord(r);
+    this.golCells.fill(0); this.cgol = 0; this.loveGrid.fill(0); this.lolzGrid.fill(0);
+    this.player.reset(); this.player2.reset(); for (const f of this.fighters) f.reset(); this.fighcount = 0;
   }
 
   // ---- gravity --------------------------------------------------------------------------------------------------------
   /** Gravity vector at (x, y) for a particle with the given Gravity property; result in this.gfx / this.gfy (no allocation). */
   gfx = 0; gfy = 0;
-  gravityXY(x: number, y: number, particleGrav: number): void {
+  /** Newtonian gravity (mass map -> force field); enable with `newton.enabled = true`. */
+  readonly newton: NewtonianGravity;
+  /** Scratch stack for PSTN (Simulation::Element_PSTN_tempParts). */
+  readonly pstnTemp: Int32Array;
+  gravityXY(x: number, y: number, particleGrav: number, newtonGrav = 0): void {
+    this.gravityBase(x, y, particleGrav);
+    if (newtonGrav) { const c = this.cell(x, y); this.gfx += newtonGrav * this.newton.forceX[c]; this.gfy += newtonGrav * this.newton.forceY[c]; }
+  }
+  private gravityBase(x: number, y: number, particleGrav: number): void {
     switch (this.gravityMode) {
       case GRAV.OFF: this.gfx = 0; this.gfy = 0; return;
       case GRAV.RADIAL: {
@@ -249,8 +296,8 @@ export class PowderSim {
       default: this.gfx = 0; this.gfy = particleGrav;
     }
   }
-  gravityField(x: number, y: number, particleGrav: number): [number, number] {
-    this.gravityXY(x, y, particleGrav);
+  gravityField(x: number, y: number, particleGrav: number, newtonGrav = 0): [number, number] {
+    this.gravityXY(x, y, particleGrav, newtonGrav);
     return [this.gfx, this.gfy];
   }
 
@@ -326,6 +373,18 @@ export class PowderSim {
       } else if ((ti === PT.NEUT || ti === PT.ELEC) && (rt === PT.CLNE || rt === PT.PCLN || rt === PT.BCLN || rt === PT.PBCN)) {
         if (!this.ctype[rid]) this.ctype[rid] = ti;
       }
+      if (rt === PT.PRTI) {
+        const sg = (v: number) => (v < 0 ? -1 : v > 0 ? 1 : 0), PRX = [-1, 0, 1, 1, 1, 0, -1, -1], PRY = [-1, -1, -1, 0, 1, 1, 1, 0];
+        let count: number;
+        for (count = 0; count < 8; count++) if (sg(x - nx) === sg(PRX[count]) && sg(y - ny) === sg(PRY[count])) break;
+        count %= 8;
+        this.tmp[rid] = Math.trunc((this.temp[rid] - 73.15) / 100 + 1);
+        if (this.tmp[rid] >= 101) this.tmp[rid] = 100; else if (this.tmp[rid] < 0) this.tmp[rid] = 0;
+        for (let n = 0; n < 80; n++) {
+          const slot = this.portalSlot(this.tmp[rid], count, n);
+          if (!slot.type) { this.storeRecord(slot, i); this.killPart(i); break; }
+        }
+      }
       return 0;
     }
     if (e === 2) {
@@ -394,7 +453,7 @@ export class PowderSim {
     }
     if (ti === PT.NEUT && (E[rt].Properties & PROP_NEUTABSORB)) { this.killPart(i); return 0; }
     if (ti === PT.CNCT) {
-      const [gx, gy] = this.gravityField(x, y, E[PT.CNCT].Gravity);
+      const [gx, gy] = this.gravityField(x, y, E[PT.CNCT].Gravity, E[PT.CNCT].Gravity);
       const ox = gx > 0 ? 1 : gx < 0 ? -1 : 0, oy = gy > 0 ? 1 : gy < 0 ? -1 : 0;
       if ((ox !== 0) !== (oy !== 0) && ((nx - x) * ox > 0 || (ny - y) * oy > 0)) {
         const below = this.typeAt(x + ox, y + oy);
@@ -610,7 +669,7 @@ export class PowderSim {
     this.surroundSpace = space; this.nt = nt;
     const e = this.E[t];
     this.pGravX = 0; this.pGravY = 0;
-    if (!(e.Properties & TYPE_SOLID) && (e.Gravity || e.NewtonianGravity)) { this.gravityXY(x, y, e.Gravity); this.pGravX = this.gfx; this.pGravY = this.gfy; }
+    if (!(e.Properties & TYPE_SOLID) && (e.Gravity || e.NewtonianGravity)) { this.gravityXY(x, y, e.Gravity, e.NewtonianGravity); this.pGravX = this.gfx; this.pGravY = this.gfy; }
   }
 
   // ---- per-frame --------------------------------------------------------------------------------------------------------
@@ -618,13 +677,23 @@ export class PowderSim {
   step(): void {
     this.beforeSim(true);
     this.updateParticles(0, this.active);
+    if (this.empTriggerCount) { empTrigger(this, this.empTriggerCount); this.empTriggerCount = 0; }
     this.frameCount++;
   }
 
+  /** Set when a gravity wall changed so the gravity mask is rebuilt on the next frame. */
+  gravWallChanged = true;
+  /** PPIP trigger bits were set this frame (Element_PPIP_ppip_changed). */
+  ppipChanged = false;
   private beforeSim(willUpdate: boolean): void {
     if (willUpdate) {
       this.updateAir();
       if (this.aheatEnable) this.updateAirH();
+      if (this.gravWallChanged) { this.newton.updateMask(this.bmap); this.gravWallChanged = false; }
+      this.newton.update();
+      this.newton.mass.fill(0);
+      if (this.empDecor > 0) this.empDecor -= Math.trunc(this.empDecor / 25) + 2;
+      if (this.empDecor < 0) this.empDecor = 0;
       this.currentTick++;
       this.elementRecount ||= !(this.currentTick % 180);
       if (this.elementRecount) this.elementCount.fill(0);
@@ -639,8 +708,17 @@ export class PowderSim {
       this.blockAirH[c] = (this.blockAir[c] || w === WL.GRAV) ? 0x8 : 0;
     }
     if (this.forceStackingCheck || this.rng.chance(1, 10)) this.checkStacking();
+    if (this.elementCount[PT.LOVE] > 0 || this.elementCount[PT.LOLZ] > 0) growLoveLolz(this);
     if (this.elementCount[PT.WIRE] > 0) for (let i = 0; i < this.active; i++) if (this.type[i] === PT.WIRE) this.tmp[i] = this.ctype[i];
+    if (this.ppipChanged) {
+      for (let i = 0; i < this.active; i++) if (this.type[i] === PT.PPIP) { this.tmp[i] |= (this.tmp[i] & 0xe0000000) >>> 3; this.tmp[i] &= ~0xe0000000; }
+      this.ppipChanged = false;
+    }
+    if (this.elementCount[PT.LIFE] > 0 && ++this.cgol >= this.golSpeed) simulateGoL(this);
     for (let q = 0; q < 101; q++) { this.wireless[q * 2] = this.wireless[q * 2 + 1]; this.wireless[q * 2 + 1] = 0; }
+    // respawn the stickmen at their spawn points
+    if (!this.player.spwn && this.player.spawnID >= 0) this.createPart(-1, this.x[this.player.spawnID] | 0, this.y[this.player.spawnID] | 0, PT.STKM);
+    if (!this.player2.spwn && this.player2.spawnID >= 0) this.createPart(-1, this.x[this.player2.spawnID] | 0, this.y[this.player2.spawnID] | 0, PT.STKM2);
   }
 
   recalcFreeParticles(doLifeDec: boolean): void {
@@ -768,7 +846,7 @@ export class PowderSim {
       let gelScale = 1;
       if (t === PT.GEL) gelScale = this.tmp[i] * 2.55;
       if ((E[t].Properties & TYPE_LIQUID) && (t !== PT.GEL || gelScale > 1 + this.rng.between(0, 254))) {
-        this.gravityXY(x, y, -2);
+        this.gravityXY(x, y, -2, -2);
         const ox = clampf(Math.round(this.gfx + x), x - 1, x + 1), oy = clampf(Math.round(this.gfy + y), y - 1, y + 1);
         if (ox !== x || oy !== y) {
           const r = this.pmap[oy * XRES + ox];
@@ -906,16 +984,20 @@ export class PowderSim {
       t = PT.FIRE; this.changeType(i, x, y, t);
       this.pv[c] += 0.25 * CFDS;
     }
-    // pressure transitions (no Newtonian gravity field, so gravtot is 0)
+    // pressure transitions, including the high-gravity variant
     {
       let s = 1;
-      const el = E[t], p = this.pv[c], gravtot = 0;
+      const el = E[t], p = this.pv[c], gravtot = Math.abs(this.newton.forceX[c]) + Math.abs(this.newton.forceY[c]);
       if (el.HighPressureTransition !== NT && p > el.HighPressure) {
         if (el.HighPressureTransition !== ST) t = el.HighPressureTransition;
         else if (t === PT.BMTL) { if (p > 2.5) t = PT.BRMT; else if (p > 1 && this.tmp[i] === 1) t = PT.BRMT; else s = 0; }
         else s = 0;
       } else if (el.LowPressureTransition !== NT && p < el.LowPressure && gravtot <= el.LowPressure / 4) {
         if (el.LowPressureTransition !== ST) t = el.LowPressureTransition; else s = 0;
+      } else if (el.HighPressureTransition !== NT && gravtot > el.HighPressure / 4) {
+        if (el.HighPressureTransition !== ST) t = el.HighPressureTransition;
+        else if (t === PT.BMTL) { if (gravtot > 0.625) t = PT.BRMT; else if (gravtot > 0.25 && this.tmp[i] === 1) t = PT.BRMT; else s = 0; }
+        else s = 0;
       } else s = 0;
       if (s) {
         if (t === PT.NONE) { this.killPart(i); return true; }
@@ -948,7 +1030,19 @@ export class PowderSim {
     this.flags[i] &= ~FLAG_STAGNANT;
     const nbNt = this.nt, nbSpace = this.surroundSpace;
 
-    if (E[t].Properties & TYPE_ENERGY) {
+    if (t === PT.STKM || t === PT.STKM2 || t === PT.FIGH) {
+      // head movement: the head passes through anything
+      this.x[i] += this.vx[i]; this.y[i] += this.vy[i];
+      const nx = (this.x[i] + 0.5) | 0, ny = (this.y[i] + 0.5) | 0;
+      if (ny !== y || nx !== x) {
+        if (this.pmap[y * XRES + x] && ID(this.pmap[y * XRES + x]) === i) this.pmap[y * XRES + x] = 0;
+        else if (this.photons[y * XRES + x] && ID(this.photons[y * XRES + x]) === i) this.photons[y * XRES + x] = 0;
+        if (nx < CELL || nx >= XRES - CELL || ny < CELL || ny >= this.YRES - CELL) { this.killPart(i); return; }
+        if (E[t].Properties & TYPE_ENERGY) this.photons[ny * XRES + nx] = PMAP(i, t);
+        else if (t) this.pmap[ny * XRES + nx] = PMAP(i, t);
+      }
+      return;
+    } else if (E[t].Properties & TYPE_ENERGY) {
       if (t === PT.PHOT) {
         if (this.flags[i] & 2 /* FLAG_SKIPMOVE */) { this.flags[i] &= ~2; return; }
         if (this.evalMove(PT.PHOT, finX, finY)) {
@@ -987,6 +1081,10 @@ export class PowderSim {
         if (t === PT.PHOT) {
           let mask = E[TYP(r)].PhotonReflectWavelengths;
           if (TYP(r) === PT.LITH) mask = 0x1f << Math.min(25, Math.max(0, this.ctype[ID(r)] >> 2));
+          else if (TYP(r) === PT.SEED) {
+            const colour = (this.ctype[ID(r)] >> 6) & 0x3f; // PLNT_COLOUR genes pick which wavelengths a seed reflects
+            mask |= (colour & 0b110000 ? 0 : 1 << 25) | (colour & 0b001100 ? 0 : 1 << 15) | (colour & 0b000011 ? 0 : 1 << 5);
+          }
           this.ctype[i] &= mask;
         }
         const gn = this.getNormalInterp(t, this.x[i], this.y[i], this.vx[i], this.vy[i], true);
@@ -1035,7 +1133,7 @@ export class PowderSim {
       if (this.doMove(i, x, y, clearXf + dx, clearYf + dy)) { this.vx[i] *= coll; this.vy[i] *= coll; return; }
     }
     const rtSearch = (!stagnant || nbNt) ? 30 : 10;
-    if (falldown > 1 && this.gravityMode === GRAV.VERTICAL && this.vy[i] > Math.abs(this.vx[i])) {
+    if (falldown > 1 && !this.newton.enabled && this.gravityMode === GRAV.VERTICAL && this.vy[i] > Math.abs(this.vx[i])) {
       let s = 0, rt = rtSearch;
       if (t === PT.GEL) rt = Math.trunc(this.tmp[i] * 0.2 + 5);
       let nx = -1, ny = -1;
@@ -1058,7 +1156,7 @@ export class PowderSim {
       const ptGrav = E[t].Gravity, rt = rtSearch;
       let s = 0, nxf = clearXf, nyf = clearYf, nx = clearX, ny = clearY, prevX = 0, prevY = 0;
       for (let j = 0; j < rt; j++) {
-        this.gravityXY(nx, ny, ptGrav); pGravX = this.gfx; pGravY = this.gfy;
+        this.gravityXY(nx, ny, ptGrav, 1); pGravX = this.gfx; pGravY = this.gfy;
         const mv = Math.max(Math.abs(pGravX), Math.abs(pGravY));
         if (mv < 0.0001) break;
         pGravX /= mv; pGravY /= mv;
@@ -1076,7 +1174,7 @@ export class PowderSim {
       if (s === 1) {
         clearX = nx; clearY = ny;
         for (let j = 0; j < rt; j++) {
-          this.gravityXY(nx, ny, ptGrav); pGravX = this.gfx; pGravY = this.gfy;
+          this.gravityXY(nx, ny, ptGrav, 1); pGravX = this.gfx; pGravY = this.gfy;
           const mv = Math.max(Math.abs(pGravX), Math.abs(pGravY));
           if (mv < 0.0001) break;
           pGravX /= mv; pGravY /= mv;
@@ -1320,7 +1418,7 @@ export class PowderSim {
       this.ohv[c] = clampf(dh, MIN_TEMP, MAX_TEMP);
       let dvx = vx[c], dvy = vy[c];
       if (x >= 2 && x < XC - 2 && y >= 2 && y < YC - 2 && this.convection !== 'off') {
-        let [gx, gy] = this.gravityField(x * CELL, y * CELL, -1);
+        let [gx, gy] = this.gravityField(x * CELL, y * CELL, -1, -1);
         if (this.convection === 'legacy') {
           const weight = ((hv[c] - hv[c - 1]) * gx + (hv[c] - hv[c - XC]) * gy) / 5000;
           if (weight > 0 && !(bh[c - XC] & 8)) { dvx += weight * gx; dvy += weight * gy; }

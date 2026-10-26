@@ -232,6 +232,7 @@ export const pump: Hook = (s, i, x, y) => {
 export const gpmp: Hook = (s, i, x, y) => {
   if (s.life[i] !== 10) { if (s.life[i] > 0) s.life[i]--; return; }
   s.temp[i] = Math.min(256 + 273.15, Math.max(-256 + 273.15, s.temp[i]));
+  s.newton.mass[s.cell(x, y)] = 0.2 * (s.temp[i] - 273.15);
   for (let rx = -2; rx <= 2; rx++) for (let ry = -2; ry <= 2; ry++) {
     if (!rx && !ry) continue;
     const r = near(s, x, y, rx, ry);
@@ -299,7 +300,8 @@ export const fray: Hook = (s, i, x, y) => {
 };
 
 /* ---- powered cloners, storage and the ARAY ray emitter (PCLN/PBCN/STOR/ARAY.cpp) ---- */
-import { filtInteract } from '../optics';
+import { filtInteract, filtWavelengths } from '../optics';
+import { soapDetach } from './soap';
 
 function copyTarget(s: PowderSim, i: number, x: number, y: number, skip: number[]): void {
   if (s.ctype[i] > 0 && s.ctype[i] < PT_NUM && E[s.ctype[i]].Enabled) return;
@@ -385,6 +387,7 @@ export const stor: Hook = (s, i, x, y) => {
     if (!r) continue;
     const rid = ID(r), rt = TYP(r);
     if (!s.tmp[i] && !s.life[i] && rt !== PT.STOR && !(E[rt].Properties & TYPE_SOLID) && (!s.ctype[i] || rt === s.ctype[i])) {
+      if (rt === PT.SOAP) soapDetach(s, rid);
       s.tmp[i] = s.type[rid]; s.temp[i] = s.temp[rid]; s.tmp2[i] = s.life[rid]; s.tmp3[i] = s.tmp[rid]; s.tmp4[i] = s.ctype[rid];
       s.killPart(rid);
     }
@@ -434,6 +437,111 @@ export const aray: Hook = (s, i, x, y) => {
           if (rt === PT.STOR) { s.tmp[rid] = 0; s.life[rid] = 0; } else if (rt === PT.FILT) s.life[rid] = 2;
           go = true;
         } else go = false;
+      }
+    }
+  }
+};
+
+/* ---- LSNS / VSNS / LDTC (LSNS.cpp, VSNS.cpp, LDTC.cpp) ---- */
+export const lsns: Hook = (s, i, x, y) => {
+  let rd = s.tmp2[i];
+  if (rd > 25) s.tmp2[i] = rd = 25;
+  if (s.life[i]) { s.life[i] = 0; sparkNeighbours(s, i, x, y, true); }
+  let ser = false, de = false, life = 0;
+  const mode = s.tmp[i], limit = s.temp[i] - 273.15;
+  for (let rx = -rd; rx < rd + 1; rx++) for (let ry = -rd; ry < rd + 1; ry++) {
+    if (!(x + rx >= 0 && y + ry >= 0 && x + rx < s.XRES && y + ry < s.YRES && (rx || ry))) continue;
+    const r = either(s, x, y, rx, ry);
+    if (!r) continue;
+    const rt = TYP(r), rid = ID(r);
+    if (mode === 1) { if (rt !== PT.LSNS && rt !== PT.FILT && s.life[rid] >= 0) { ser = true; life = s.life[rid]; } }
+    else if (mode === 3) { if (rt === PT.FILT) { de = true; life = s.ctype[rid]; } }
+    else if (mode === 2) { if (rt !== PT.METL && s.life[rid] <= limit) s.life[i] = 1; }
+    else if (rt !== PT.METL && s.life[rid] > limit) s.life[i] = 1;
+  }
+  if (!ser && !de) return;
+  if (ser) setFilterChain(s, x, y, 0x10000000 + life);
+  else for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
+    if (!rx && !ry) continue;
+    const r = either(s, x, y, rx, ry);
+    if (r && TYP(r) !== PT.FILT) s.life[ID(r)] = life - 0x10000000;
+  }
+};
+
+export const vsns: Hook = (s, i, x, y) => {
+  let rd = s.tmp2[i];
+  if (rd > 25) s.tmp2[i] = rd = 25;
+  if (s.life[i]) { s.life[i] = 0; sparkNeighbours(s, i, x, y); }
+  let ser = false, de = false, vs = 0;
+  const mode = s.tmp[i], limit = s.temp[i] - 273.15;
+  for (let rx = -rd; rx < rd + 1; rx++) for (let ry = -rd; ry < rd + 1; ry++) {
+    if (!(x + rx >= 0 && y + ry >= 0 && x + rx < s.XRES && y + ry < s.YRES && (rx || ry))) continue;
+    const r = either(s, x, y, rx, ry);
+    if (!r) continue;
+    const rt = TYP(r), rid = ID(r), vm = Math.sqrt(s.vx[rid] * s.vx[rid] + s.vy[rid] * s.vy[rid]);
+    const solid = (E[rt].Properties & TYPE_SOLID) !== 0;
+    if (mode === 1) { if (rt !== PT.VSNS && rt !== PT.FILT && !solid) { ser = true; vs = vm; } }
+    else if (mode === 3) {
+      if (rt === PT.FILT) { const vel = s.ctype[rid] - 0x10000000; if (vel >= 0 && vel < MAX_VELOCITY) { de = true; vs = vel; } }
+    } else if (mode === 2) { if (!solid && vm <= limit) s.life[i] = 1; }
+    else if (!solid && vm > limit) s.life[i] = 1;
+  }
+  if (ser) setFilterChain(s, x, y, 0x10000000 + Math.trunc(vs + 0.5));
+  if (de) {
+    for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
+      if (!rx && !ry) continue;
+      const r = either(s, x, y, rx, ry);
+      if (!r) continue;
+      const rt = TYP(r), rid = ID(r);
+      if (rt !== PT.FILT && !(E[rt].Properties & TYPE_SOLID)) {
+        const vm = Math.sqrt(s.vx[rid] * s.vx[rid] + s.vy[rid] * s.vy[rid]);
+        if (vm > 0) { s.vx[rid] *= vs / vm; s.vy[rid] *= vs / vm; }
+        break; // as upstream: leaves only the inner (ry) loop
+      }
+    }
+  }
+};
+
+const phsData = (t: number) => t === PT.FILT || t === PT.PHOT || t === PT.BRAY || t === PT.BIZR || t === PT.BIZRG || t === PT.BIZRS;
+export const ldtc: Hook = (s, i, x, y) => {
+  const XRES = s.XRES, ctype = TYP(s.ctype[i]), extra = ID(s.ctype[i]);
+  let spaces = s.tmp2[i], length = s.tmp[i];
+  const flags = s.tmp2[i];
+  const copyColor = !(flags & 4), ignoreEnergy = !!(flags & 2), invert = !!(flags & 1), keep = !!(flags & 8);
+  if (spaces < 0) spaces = s.tmp2[i] = 0;
+  if (length < 0) length = s.tmp[i] = 0;
+  for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
+    if (!rx && !ry) continue;
+    let r = s.pmap[(y + ry) * XRES + x + rx];
+    if (!r) continue;
+    const rt0 = TYP(r);
+    const boolMode = (E[rt0].Properties & PROP_CONDUCTS) && !SENSOR_SKIP.has(rt0) && s.life[ID(r)] === 0;
+    const filtMode = copyColor && rt0 === PT.FILT;
+    if (!boolMode && !filtMode) continue;
+    const maxRange = s.life[i] + s.tmp[i], xs = -rx, ys = -ry;
+    for (let xc = x + xs * (s.life[i] + 1), yc = y + ys * (s.life[i] + 1); !s.tmp[i] || (xs * (xc - x) <= maxRange && ys * (yc - y) <= maxRange); xc += xs, yc += ys) {
+      if (!(xc >= 0 && yc >= 0 && xc < XRES && yc < s.YRES)) break;
+      let rr = s.pmap[yc * XRES + xc];
+      if (!rr && !ignoreEnergy) rr = s.photons[yc * XRES + xc];
+      if (!rr) continue;
+      const matches = ctype === TYP(rr) && (ctype !== PT.LIFE || s.ctype[ID(rr)] === extra);
+      if (!(!ctype || (invert !== matches))) { if (keep) continue; break; }
+      if (boolMode) {
+        s.life[ID(r)] = 4; s.ctype[ID(r)] = TYP(r);
+        s.changeType(ID(r), x + rx, y + ry, PT.SPRK);
+        break;
+      }
+      if (filtMode) {
+        if (!phsData(TYP(rr))) continue;
+        let nx = x + rx, ny = y + ry;
+        const wl = TYP(rr) === PT.FILT ? filtWavelengths(s, ID(rr)) : s.ctype[ID(rr)];
+        while (TYP(r) === PT.FILT) {
+          s.ctype[ID(r)] = wl;
+          nx += rx; ny += ry;
+          if (nx < 0 || ny < 0 || nx >= XRES || ny >= s.YRES) break;
+          r = s.pmap[ny * XRES + nx];
+        }
+        break;
       }
     }
   }

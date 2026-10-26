@@ -7,6 +7,16 @@ import * as ma from './materials';
 import * as so from './solids';
 import * as xo from './exotic';
 import * as dv from './devices';
+import * as ry from './rays';
+import * as po from './portals';
+import { tron } from './tron';
+import { soap, soapChangeType } from './soap';
+import * as gw from './gravwells';
+import { pipe } from './pipes';
+import { pstn } from './pistons';
+import { seed, seedCreate } from './plants';
+import { STICKMAN_BEHAVIORS } from './stickman';
+import { lifeCreate } from '../gol';
 import { fireUpdate } from './fire';
 import { CREATES } from './creates';
 
@@ -29,42 +39,37 @@ const UPDATES: Record<string, NonNullable<Behavior['update']>> = {
   FIRW: xo.firw, FWRK: xo.fwrk, C5: xo.c5, SHLD1: xo.shld1, SHLD2: xo.shld2, SHLD3: xo.shld3, SHLD4: xo.shld4,
   ACEL: dv.acel, DCEL: dv.dcel, RPEL: dv.rpel, DMG: dv.dmg, CONV: dv.conv, MORT: dv.mort, PVOD: dv.pvod, LCRY: dv.lcry, HSWC: dv.hswc, DLAY: dv.dlay,
   PUMP: dv.pump, GPMP: dv.gpmp, TSNS: dv.tsns, PSNS: dv.psns, DTEC: dv.dtec, FRAY: dv.fray,
+  LSNS: dv.lsns, VSNS: dv.vsns, LDTC: dv.ldtc,
   PCLN: dv.pcln, PBCN: dv.pbcn, STOR: dv.stor, ARAY: dv.aray,
   RSST: so.rsst, RSSS: so.rsss,
+  CRAY: ry.cray, DRAY: ry.dray,
+  PRTI: po.prti, PRTO: po.prto,
+  TRON: tron,
+  SOAP: soap,
+  NBHL: gw.nbhl, NWHL: gw.nwhl, GBMB: gw.gbmb, GRVT: gw.grvt,
+  PIPE: pipe, PPIP: pipe,
+  PSTN: pstn, SEED: seed,
   GLOW: ma.glow, MERC: ma.merc, GEL: ma.gel, SPNG: ma.spng, CLNE: ma.clne, BCLN: ma.bcln,
 };
 
 export const BEHAVIORS: Record<string, Behavior> = {};
 for (const [k, update] of Object.entries(UPDATES)) BEHAVIORS[k] = { update };
+CREATES.SEED = seedCreate;
+CREATES.LIFE = lifeCreate;
 CREATES.SLCN = (s, i) => so.initSparkles(s, i);
+(BEHAVIORS.SOAP ??= {}).changeType = soapChangeType;
+for (const [k, b] of Object.entries(STICKMAN_BEHAVIORS)) BEHAVIORS[k] = { ...BEHAVIORS[k], ...b };
 for (const [k, create] of Object.entries(CREATES)) (BEHAVIORS[k] ??= {}).create = create;
 
 /** Elements whose ported update omits a documented branch. Keys are PT_ names; values say what is missing. */
 export const PARTIAL_PORTS: Record<string, string> = {
-  PLNT: 'tree-growth branch (ctype bit 0) needs SEED, which is not ported',
-  GPMP: 'on/off propagation only; the Newtonian gravity source it drives is not simulated',
-  O2: 'extreme-gravity BRMT/NEUT/PHOT/GRVT branch needs Newtonian gravity',
-  DEUT: 'gravity compression term fixed at its zero-gravity value',
-  NEUT: 'SEED gene-flip case omitted',
-  PROT: 'SEED mutation case omitted',
-  LIGH: 'STKM damage omitted',
+  LIFE: 'custom rulesets (ctype >= 24) have no colour registry, so they render white; the rule engine itself is ported',
   HSWC: 'FILT temperature deserialisation omitted',
-  SPRK: 'EMP and PPIP receivers are accepted but their trigger effects are not ported',
   FIRW: 'burst colour is random RGB instead of Renderer::firwTable',
   FWRK: 'burst colour is random RGB (as in the original)',
-  CLNE: 'LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported',
-  BCLN: 'LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported',
-  PCLN: 'LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported',
-  PBCN: 'LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported',
   WIFI: 'channel flags are cleared every frame (equivalent to the original ISWIRE countdown)',
 };
 /** Elements whose behaviour lives outside their element file in the original and is not ported. */
 export const ENGINE_SIDE_UNPORTED: Record<string, string> = {
-  LIFE: 'Game of Life rules run in Simulation::SimulateGoL',
-  LOVE: 'pattern growth runs in Simulation::BeforeSim',
-  LOLZ: 'pattern growth runs in Simulation::BeforeSim',
-  EMP: 'effect runs in Simulation::AfterSim (Element_EMP_Trigger)',
-  SPAWN: 'stickman spawn point; STKM is not ported', SPAWN2: 'stickman spawn point; STKM2 is not ported',
-  FRME: 'frame for PSTN pistons; PSTN is not ported',
   BIZR: 'update only blends decoration colour (not tracked)', BIZRG: 'update only blends decoration colour (not tracked)', BIZRS: 'update only blends decoration colour (not tracked)',
 };

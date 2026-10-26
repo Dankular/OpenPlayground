@@ -1,10 +1,11 @@
 /* Radiation, energy particles and fissile/exotic matter. Ported from NEUT/PLUT/URAN/ISOZ/ISZS/DEUT/PHOT/ELEC/PROT/POLO/
- * AMTR/ANAR/SING/WARP.cpp, The Powder Toy (GPL-3.0). Newtonian gravity is not simulated, so gravtot is 0 where used.
- * Not ported: SEED gene mutation and RSST/RSSS liquefaction cases that need those elements' own updates. */
+ * AMTR/ANAR/SING/WARP.cpp, The Powder Toy (GPL-3.0).
+ */
 import { CELL, CFDS, ELEMENTS, ID, MAX_PRESSURE, MAX_TEMP, MIN_PRESSURE, MIN_TEMP, PMAP, PROP_CONDUCTS, PT, PT_NUM, TYP } from '../elements';
 import type { PowderSim } from '../sim';
 import { restrictTemp } from '../sim';
 import { fireUpdate } from './fire';
+import { PLNT_COLOUR, PLNT_LIFE, PLNT_TOTAL_TMP } from './plants';
 
 const E = ELEMENTS;
 type Hook = (s: PowderSim, i: number, x: number, y: number, ss: number, nt: number) => boolean | void;
@@ -76,6 +77,17 @@ export const neut: Hook = (s, i, x, y, ss) => {
       case PT.EXOT: if (s.rng.chance(1, 20)) s.life[rid] = 1500; break;
       case PT.RFRG: s.createPart(rid, px, py, s.rng.chance(1, 2) ? PT.GAS : PT.CAUS); break;
       case PT.BASE: if (s.temp[rid] > 50 + 273.15 && s.rng.chance(1, 35)) s.createPart(rid, px, py, PT.LRBD); break;
+      case PT.SEED:
+        if (!rx && !ry) { // flip a random gene with 1/2 chance
+          switch (s.rng.between(0, 9)) {
+            case 0: s.ctype[rid] ^= 1 << s.rng.between(PLNT_COLOUR, PLNT_LIFE - 1); break;
+            case 1: s.tmp[rid] ^= 1 << s.rng.between(0, PLNT_TOTAL_TMP - 1); break;
+            case 2: s.tmp2[rid] ^= 1 << s.rng.between(0, PLNT_TOTAL_TMP - 1); break;
+            case 3: s.tmp3[rid] ^= 1 << s.rng.between(0, PLNT_TOTAL_TMP - 1); break;
+            case 4: s.tmp4[rid] ^= 1 << s.rng.between(0, PLNT_TOTAL_TMP - 1); break;
+          }
+        }
+        break;
       case PT.RSSS:
         if (!rx && !ry) { resistLiquefy(s, i, rid, x, y, PT.RSST); return true; }
         break;
@@ -104,10 +116,11 @@ export const isoz: Hook = (s, i, x, y) => {
 };
 
 export const deut: Hook = (s, i, x, y) => {
+  const gc = s.cell(x, y), gravtot = Math.abs(s.newton.forceX[gc]) + Math.abs(s.newton.forceY[gc]);
   const temp = Math.max(1, s.temp[i] + 1);
   let maxlife = Math.trunc(10000 / (temp + 1) - 1);
   if (s.rng.chance(10000 % Math.trunc(temp + 1), Math.trunc(temp + 1))) maxlife++;
-  maxlife *= Math.trunc(5 - 8 / 2); // gravtot = 0
+  maxlife *= Math.trunc(5 - 8 / (gravtot + 2));
   if (s.life[i] < maxlife) {
     for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
       if (!rx && !ry) continue;
@@ -239,6 +252,13 @@ export const prot: Hook = (s, i, x, y) => {
       break;
     }
     case PT.RSSS: s.killPart(uid); s.killPart(i); return true;
+    case PT.SEED:
+      if (s.rng.chance(1, 2)) { // swap two phase programs
+        const j = s.rng.between(0, 3), k = s.rng.between(0, 3);
+        const f = [s.tmp, s.tmp2, s.tmp3, s.tmp4], oj = f[j][uid], ok = f[k][uid];
+        f[j][uid] = ok; f[k][uid] = oj;
+      }
+      break;
     case PT.NONE:
       if (s.life[i] && !--s.life[i]) { s.killPart(i); return true; }
       break;

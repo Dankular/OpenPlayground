@@ -1,5 +1,5 @@
 /* Viruses, exotic matter, lightning, fireworks and force-field shields. Ported from VIRS/EXOT/VIBR/GRAV/INVIS/LIGH/
- * FIRW/FWRK/C5/SHLD1-4.cpp, The Powder Toy (GPL-3.0). Not ported: LIGH's STKM damage, VIBR/EXOT graphics, firework colour
+ * FIRW/FWRK/C5/SHLD1-4.cpp, The Powder Toy (GPL-3.0). Not ported: VIBR/EXOT graphics, firework colour
  * tables (EMBR ctype is set to a random colour instead of Renderer::firwTable). */
 import { CFDS, ELEMENTS, ID, MAX_PRESSURE, MAX_TEMP, MIN_PRESSURE, PROP_CONDUCTS, PT, TYP } from '../elements';
 import type { PowderSim } from '../sim';
@@ -224,6 +224,8 @@ export const ligh: Hook = (s, i, x, y, ss) => {
         if (s.rng.chance(1, 3)) { s.changeType(rid, px, py, PT.NEUT); s.life[rid] = s.rng.between(480, 959); s.vx[rid] = s.rng.between(-5, 5); s.vy[rid] = s.rng.between(-5, 5); }
         break;
       case PT.COAL: case PT.BCOL: if (s.life[rid] > 100) s.life[rid] = 99; break;
+      case PT.STKM: if (s.player.elem !== PT.LIGH) s.life[rid] -= Math.trunc(powderful / 100); break;
+      case PT.STKM2: if (s.player2.elem !== PT.LIGH) s.life[rid] -= Math.trunc(powderful / 100); break;
       case PT.HEAC:
         s.temp[rid] = restrictTemp(s.temp[rid] + Math.trunc(powderful / 10));
         if (s.temp[rid] > E[PT.HEAC].HighTemperature) { s.changeType(rid, px, py, PT.LAVA); s.ctype[rid] = PT.HEAC; }
@@ -263,7 +265,7 @@ function burst(s: PowderSim, i: number, x: number, y: number, col: number): void
   s.killPart(i);
 }
 function launchDirection(s: PowderSim, x: number, y: number, g: number): [number, number] {
-  s.gravityXY(x, y, g);
+  s.gravityXY(x, y, g, 1);
   let gx = s.gfx, gy = s.gfy;
   if (gx * gx + gy * gy < 0.001) { const a = s.rng.between(0, 6283) * 0.001; gx += Math.sin(a) * g * 0.5; gy += Math.cos(a) * g * 0.5; }
   return [gx, gy];

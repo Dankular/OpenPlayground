@@ -10,9 +10,11 @@ const emit = (speed: number, life: (s: any) => number, angle: (s: any) => number
   const a = angle(s); s.life[i] = life(s); s.vx[i] = speed * Math.cos(a); s.vy[i] = speed * Math.sin(a);
 };
 
+import { tronCreate } from './tron';
 export const CREATES: Record<string, Behavior['create']> = {
   FIRE: lifeOnly(120, 169), PLSM: lifeOnly(50, 199), CFLM: lifeOnly(50, 199), LAVA: lifeOnly(240, 359),
   SING: lifeOnly(60, 109), WARP: lifeOnly(70, 164),
+  TRON: tronCreate,
   CLST: (s, i) => { s.tmp[i] = s.rng.between(0, 6); },
   CRMC: (s, i) => { s.tmp2[i] = s.rng.between(0, 4); },
   PQRT: (s, i) => { s.tmp2[i] = s.rng.between(0, 10); },
@@ -39,7 +41,7 @@ export const CREATES: Record<string, Behavior['create']> = {
   LIGH: (s, i, x, y, _t, v) => {
     s.life[i] = v >= 0 ? Math.min(v, 55) : 30;
     s.temp[i] = s.life[i] * 150;
-    let [gx, gy] = s.gravityField(x, y, 1);
+    let [gx, gy] = s.gravityField(x, y, 1, 1);
     let gsize = gx * gx + gy * gy;
     if (gsize < 0.0016) {
       const angle = s.rng.between(0, 6283) * 0.001;

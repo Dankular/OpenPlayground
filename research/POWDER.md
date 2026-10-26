@@ -36,7 +36,15 @@ Confirmed by reading the cited upstream functions:
 | Photon refraction/reflection (`get_normal`, wavelength bins) | `Simulation.cpp` | `getNormal*`, `wavelengthBin` |
 | Wall types, E-wall/detector spark map (`set_emap`) | `Simulation.cpp` | `bmap`, `emap`, `setEmap` |
 | `create_part`, `kill_part`, `part_change_type`, `flood_prop`, `CreateLine`, SPRK creation rules | `Simulation.cpp` | same names in camelCase |
-| Frame order: air, ambient heat, `RecalcFreeParticles`, wall/air block maps, stacking check, WIRE, wireless channels, particle update | `BeforeSim`, `UpdateParticles` | `step` |
+| Frame order: air, ambient heat, gravity mask and Newtonian force update, `RecalcFreeParticles`, wall/air block maps, stacking check, LOVE/LOLZ growth, WIRE, PPIP tmp shift, Game of Life, wireless channels, stickman respawn, particle update, EMP burst | `BeforeSim`, `UpdateParticles`, `AfterSim` | `step`, `beforeSim` |
+| Newtonian gravity: mass map convolved with a 1/r² kernel by FFT, gravity mask flooded from the border across non-gravity walls | `gravity/Fft.cpp`, `UpdateGravityMask` | `NewtonianGravity` (own radix-2 FFT, see deviations) |
+| Portals (`portalp` records, orbit animation, `try_move` entry) | `PRTI.cpp`, `PRTO.cpp`, `Simulation.cpp` | `portals.ts`, `tryMove` |
+| Particle pipes and PPIP triggers, STOR transfer | `PIPE.cpp`, `PPIP.cpp` | `pipes.ts` |
+| Game of Life rule engine (all 24 built-in rulesets, multi-state rules, wraparound) | `SimulateGoL`, `SimulationData.cpp`, `LIFE.cpp` | `gol.ts` |
+| LOVE / LOLZ pattern growth | `BeforeSim`, `LOVE.cpp`, `LOLZ.cpp` | `growLoveLolz` |
+| Stickmen and fighters (legs, controls, element use, deaths, portals, respawn) | `STKM.cpp`, `STKM2.cpp`, `FIGH.cpp`, `SPAWN*.cpp` | `stickman.ts` |
+| Pistons and frames | `PSTN.cpp` | `pistons.ts` |
+| EMP burst | `EMP.cpp`, `Probability.cpp` | `emp.ts` |
 
 Known deviations and gaps (each is a real difference, not a rounding detail):
 
@@ -44,13 +52,20 @@ Known deviations and gaps (each is a real difference, not a rounding detail):
   run. Distributions (`between`, `chance`) follow the originals.
 * **Floating point**: particle fields are `Float32Array`, arithmetic is JS double precision between stores; results can
   differ from the C++ float math in the last bits.
-* **Not ported**: Newtonian gravity (so NBHL/NWHL/GBMB/GRVT have no field effect), the Game of Life engine
-  (`SimulateGoL`, LIFE/LOVE/LOLZ), stickmen and fighters (STKM/STKM2/FIGH), signs, edge modes other than *void*
-  (`EDGE_LOOP`/`EDGE_SOLID`), `flood_water` water equalisation, the legacy (non-heat) mode paths, portals' energy
-  teleport in `try_move`, SPRK-trigger side effects for EMP/PPIP, decoration colours (`dcolour`), the property tool,
-  save-file (`.cps`/`.stm`) loading, Lua.
+* **Newtonian gravity** uses its own radix-2 FFT with zero padding to the next power of two instead of FFTW, runs on the
+  calling thread (so forces are not one frame late as on the upstream worker thread), and recomputes only when the mass map
+  or gravity mask changed. The `-M_GRAV/(NCELL*4)` kernel scale in the original compensates for FFTW's unnormalised inverse;
+  here the inverse is normalised so the kernel scale is `-M_GRAV` (checked against the force of a single point mass in
+  `tests/powder-engine.test.ts`, not against FFTW output). It is **off by default**, as upstream; the panel has a toggle.
+* **Stickmen**: leg state is `Float32Array`, intermediate maths is double precision. Keyboard control: arrow keys drive STKM,
+  W/A/S/D drive STKM2 while the powder grid runs and that stickman exists. Not ported: the hover HP readout, search-highlight
+  colouring, the save-file stickman flags.
+* **Not ported**: signs, edge modes other than *void* (`EDGE_LOOP`/`EDGE_SOLID`; the stickman edge-loop leg correction goes
+  with it), `flood_water` water equalisation, the legacy (non-heat) mode paths, decoration colours (`dcolour`; so BIZR/BIZRG/
+  BIZRS only render, they do not tint neighbours, and CRAY/DRAY/PIPE do not carry decoration), custom Game of Life rules'
+  colour registry, the property tool, save-file (`.cps`/`.stm`) loading, Lua.
 * **Ambient heat** (`aheat_enable`) is on here (off by default upstream) because bodies exchange heat with it.
-* `isHeatInsulator` uses `PFLAG_CAN_CONDUCT = 1` for PIPE/PPIP (verified in `PIPE.h`), but PIPE itself is not ported.
+* `isHeatInsulator` uses `PFLAG_CAN_CONDUCT = 1` for PIPE/PPIP (verified in `PIPE.h`).
 
 ## Elements: what is ported
 
@@ -65,76 +80,38 @@ test fails if it drifts from the code.
 Upstream commit `c205becb1cf7ef1915293e2c99b2c7901d2887cd` (GPL-3.0).
 
 * 194 enabled elements in the generated table.
-* 44 have no update function upstream: their full behaviour is the static table plus the engine (movement, state changes, flammability, heat, pressure).
-* 120 update functions are ported (16 with a documented omission).
-* 30 elements are not functional beyond their static properties.
+* 51 have no update function upstream: their full behaviour is the static table plus the engine (movement, state changes, flammability, heat, pressure).
+* 140 update functions are ported (4 with a documented omission).
+* 3 elements are not functional beyond their static properties.
 
 | Menu group | Static only | Ported | Ported with omissions | Not ported |
 | --- | --- | --- | --- | --- |
-| Electronics | METL PSCN NSCN INSL ETRD INWR TESC INST BRAY | NTCT PTCT BTRY SWCH ARAY WIRE TUNG | SPRK WIFI | EMP CRAY DRAY |
-| Powered | – | LCRY DLAY STOR PVOD PUMP | PCLN HSWC PBCN GPMP | PPIP |
-| Sensors | – | INVIS DTEC TSNS PSNS | – | LSNS LDTC VSNS |
-| Force | – | ACEL DCEL FRAY RPEL DMG | – | PIPE GBMB PSTN FRME |
-| Explosives | GUNP NITR PLEX RBDM LRBD THRM CFLM | FIRE THDR FUSE FSEP DEST BOMB C5 BANG IGNT EMBR LITH | FIRW LIGH FWRK | – |
-| Gases | GAS SMKE | WTRV PLSM NBLE CO2 CAUS FOG BOYL H2 VRSG RFRG | O2 | BIZRG |
-| Liquids | OIL MWAX LNTG DESL LO2 PSTE | WATR LAVA ACID DSTW SLTW GLOW CBNW FRZW GEL MERC VIRS RFGL RSST BASE | – | BIZR SOAP |
-| Powders | DUST STNE CNCT SALT SAND BGLA DYST SAWD | SNOW BRMT YEST BCOL FRZZ GRAV ANAR PQRT BREC CLST SLCN | – | SEED |
-| Solids | WAX NICE BRCK DRIC PSTS FILT ROCK | GOO ICEI WOOD BMTL GLAS COAL IRON SPNG RIME VINE SHLD1 SHLD2 SHLD3 SHLD4 QRTZ TTAN GOLD VRSS CRMC HEAC PTNM RSSS | PLNT | BIZRS SPAWN2 SPAWN |
-| Radioactive | – | PLUT PHOT URAN AMTR WARP ISOZ ISZS SING ELEC EXOT VIBR BVBR POLO | NEUT DEUT PROT | GRVT |
-| Special | VOID DMND BHOL WHOL E116 | MORT CONV | CLNE BCLN | STKM LOVE PRTI PRTO LOLZ STKM2 TRON NBHL NWHL FIGH |
-| Life | – | – | – | LIFE |
+| Electronics | METL PSCN NSCN INSL ETRD INWR TESC INST BRAY EMP | SPRK NTCT PTCT BTRY SWCH ARAY WIRE CRAY TUNG DRAY | WIFI | – |
+| Powered | – | LCRY PCLN DLAY STOR PVOD PUMP PBCN GPMP PPIP | HSWC | – |
+| Sensors | – | INVIS DTEC TSNS PSNS LSNS LDTC VSNS | – | – |
+| Force | FRME | PIPE ACEL DCEL GBMB FRAY RPEL DMG PSTN | – | – |
+| Explosives | GUNP NITR PLEX RBDM LRBD THRM CFLM | FIRE THDR FUSE FSEP LIGH DEST BOMB C5 BANG IGNT EMBR LITH | FIRW FWRK | – |
+| Gases | GAS SMKE | WTRV PLSM NBLE O2 CO2 CAUS FOG BOYL H2 VRSG RFRG | – | BIZRG |
+| Liquids | OIL MWAX LNTG DESL LO2 PSTE | WATR LAVA ACID DSTW SLTW GLOW CBNW FRZW GEL SOAP MERC VIRS RFGL RSST BASE | – | BIZR |
+| Powders | DUST STNE CNCT SALT SAND BGLA DYST SAWD | SNOW BRMT YEST BCOL FRZZ GRAV ANAR PQRT BREC CLST SLCN SEED | – | – |
+| Solids | WAX NICE BRCK DRIC PSTS SPAWN2 SPAWN FILT ROCK | GOO ICEI WOOD PLNT BMTL GLAS COAL IRON SPNG RIME VINE SHLD1 SHLD2 SHLD3 SHLD4 QRTZ TTAN GOLD VRSS CRMC HEAC PTNM RSSS | – | BIZRS |
+| Radioactive | – | NEUT PLUT PHOT URAN AMTR DEUT WARP ISOZ ISZS SING ELEC EXOT VIBR BVBR PROT GRVT POLO | – | – |
+| Special | VOID DMND BHOL WHOL LOVE E116 LOLZ | CLNE STKM MORT CONV BCLN PRTI PRTO STKM2 TRON NBHL NWHL FIGH | – | – |
+| Life | LIFE | – | – | – |
 
 Omissions in ported elements:
 
-* `PLNT`: tree-growth branch (ctype bit 0) needs SEED, which is not ported
-* `GPMP`: on/off propagation only; the Newtonian gravity source it drives is not simulated
-* `O2`: extreme-gravity BRMT/NEUT/PHOT/GRVT branch needs Newtonian gravity
-* `DEUT`: gravity compression term fixed at its zero-gravity value
-* `NEUT`: SEED gene-flip case omitted
-* `PROT`: SEED mutation case omitted
-* `LIGH`: STKM damage omitted
+* `LIFE`: custom rulesets (ctype >= 24) have no colour registry, so they render white; the rule engine itself is ported
 * `HSWC`: FILT temperature deserialisation omitted
-* `SPRK`: EMP and PPIP receivers are accepted but their trigger effects are not ported
 * `FIRW`: burst colour is random RGB instead of Renderer::firwTable
 * `FWRK`: burst colour is random RGB (as in the original)
-* `CLNE`: LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported
-* `BCLN`: LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported
-* `PCLN`: LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported
-* `PBCN`: LIFE cloning creates a LIFE particle, but the Game of Life rule engine is not ported
 * `WIFI`: channel flags are cleared every frame (equivalent to the original ISWIRE countdown)
 
 Not ported, with reason where known:
 
-* `STKM`
-* `LIFE`: Game of Life rules run in Simulation::SimulateGoL
-* `LOVE`: pattern growth runs in Simulation::BeforeSim
-* `PIPE`
 * `BIZR`: update only blends decoration colour (not tracked)
 * `BIZRG`: update only blends decoration colour (not tracked)
 * `BIZRS`: update only blends decoration colour (not tracked)
-* `PRTI`
-* `PRTO`
-* `SPAWN2`: stickman spawn point; STKM2 is not ported
-* `SPAWN`: stickman spawn point; STKM is not ported
-* `LOLZ`: pattern growth runs in Simulation::BeforeSim
-* `STKM2`
-* `EMP`: effect runs in Simulation::AfterSim (Element_EMP_Trigger)
-* `TRON`
-* `SOAP`
-* `NBHL`
-* `NWHL`
-* `GBMB`
-* `FIGH`
-* `PPIP`
-* `CRAY`
-* `PSTN`
-* `FRME`: frame for PSTN pistons; PSTN is not ported
-* `GRVT`
-* `DRAY`
-* `LSNS`
-* `LDTC`
-* `VSNS`
-* `SEED`
 <!-- coverage:end -->
 
 ## Coupling with rigid bodies
@@ -169,11 +146,14 @@ Measured in Node 22 on the CI container, 20k mixed liquid and powder particles: 
 grid about 5 ms (air solver). Real-time (60 Hz) therefore holds up to roughly 10k active particles; beyond that the grid
 runs in slow motion rather than dropping frames (`PowderWorld.advance` caps at 3 grid frames per physics step). The
 panel shows the measured milliseconds per frame. No optimisation work beyond removing per-particle allocations was done.
+Newtonian gravity (off by default) costs about 80 ms per recomputation at the full 153 x 96 size in the same environment (3 complex 512 x 256 FFTs, no real-input optimisation). It recomputes only on frames where the mass map or gravity mask changed, so static sources are free but moving ones (GRVT, GPMP, GBMB timers) make every frame that slow.
 
 ## Verification
 
 * `tests/powder-core.test.ts`: element ids, falling, resting, liquid weight swap, freeze/boil/solidify transitions,
   ambient heat, border kill.
+* `tests/powder-engine.test.ts`: CRAY/DRAY, portals, EMP, Newtonian gravity (direction, and off by default), PIPE, TRON, SOAP,
+  PSTN/FRME, LSNS/VSNS/LDTC, SEED/PLNT trees, stickmen and fighters, Game of Life (blinker, block, Seeds, multi-state), LOVE.
 * `tests/powder-chem.test.ts`: fire spread and extinguishing, spark conduction and insulation, explosions, acid, lava
   and water, ice crushing, rust.
 * `tests/powder-physics.test.ts`: photon motion and reflection, neutron chain reaction, electrolysis, sponge,

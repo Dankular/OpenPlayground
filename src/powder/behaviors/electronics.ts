@@ -6,6 +6,7 @@ import { CELL, ELEMENTS, ID, PROP_CONDUCTS, PT, PT_NUM, R_TEMP, TYP } from '../e
 import type { PowderSim } from '../sim';
 import { restrictTemp } from '../sim';
 import { fireUpdate } from './fire';
+import { ppipFloodTrigger } from './pipes';
 
 const E = ELEMENTS;
 type Hook = (s: PowderSim, i: number, x: number, y: number, ss: number, nt: number) => boolean | void;
@@ -157,7 +158,12 @@ export const sprk: Hook = (s, i, x, y, ss, nt) => {
           else if (sender === PT.NSCN && s.tmp[rid] === 3) s.tmp[rid] = 1;
         }
         continue;
-      case PT.PPIP: case PT.EMP: continue; // trigger side effects not ported
+      case PT.PPIP:
+        if (s.life[i] === 3 && !insulated(pavg) && (sender === PT.NSCN || sender === PT.PSCN || sender === PT.INST)) ppipFloodTrigger(s, x + rx, y + ry, sender);
+        continue;
+      case PT.EMP:
+        if (!s.life[rid] && s.life[i] > 0 && s.life[i] < 4) { s.empTriggerCount++; s.empDecor = Math.min(40, s.empDecor + 3); s.life[rid] = 220; }
+        continue;
       case PT.NTCT: case PT.PTCT: case PT.INWR:
         if (sender === PT.METL && !insulated(pavg) && s.life[i] < 4) {
           s.temp[rid] = 473;

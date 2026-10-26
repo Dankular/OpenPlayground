@@ -3,8 +3,10 @@ import type * as THREE from 'three';
 import './powder.css';
 import { ELEMENTS, ID, TYP, PT } from './elements';
 import { BEHAVIORS } from './behaviors';
+import { COMM, type Player } from './behaviors/stickman';
 import { PowderLayer, type PowderView } from './layer';
-import type { PowderWorld } from './world';
+import { GOL_BRUSH, type PowderWorld } from './world';
+import { BUILTIN_GOL } from './gol';
 
 const SECTIONS = ['Walls', 'Electronics', 'Powered', 'Sensors', 'Force', 'Explosives', 'Gases', 'Liquids', 'Powders', 'Solids', 'Radioactive', 'Special', 'Life', 'Tools', 'Favorites', 'Decoration'];
 
@@ -39,6 +41,7 @@ export class PowderUI {
       const ported = !!BEHAVIORS[e.key]?.update || !e.hasUpdate;
       groups.set(e.MenuSection, (groups.get(e.MenuSection) ?? '') + `<option value="${e.id}" title="${e.description.replace(/"/g, '&quot;')}">${e.name}${ported ? '' : ' ◦'}</option>`);
     }
+    groups.set(12, (groups.get(12) ?? '') + BUILTIN_GOL.map((g, n) => `<option value="${GOL_BRUSH + n}" title="${g.description}">${g.name}</option>`).join(''));
     const options = [...groups].sort((a, b) => a[0] - b[0]).map(([s, html]) => `<optgroup label="${SECTIONS[s] ?? 'Other'}">${html}</optgroup>`).join('');
     this.panel.innerHTML = `<span class="eyebrow">POWDER &amp; CHEMISTRY</span>
 <label for="powder-tool-mode">Tool</label><select id="powder-tool-mode"><option value="draw">Draw material</option><option value="erase">Erase particles</option><option value="wall">Draw wall</option><option value="unwall">Erase wall</option></select>
@@ -46,6 +49,7 @@ export class PowderUI {
 <label for="powder-radius">Brush <b id="powder-radius-value"></b> px</label><input id="powder-radius" type="range" min="1" max="14" value="3">
 <label for="powder-view">Overlay</label><select id="powder-view"><option value="particles">Particles</option><option value="pressure">Pressure</option><option value="heat">Ambient heat</option><option value="velocity">Air velocity</option></select>
 <label class="connection-breakable"><input type="checkbox" id="powder-run" checked> Run simulation</label>
+<label class="connection-breakable" title="Gravity sources (NBHL, NWHL, GBMB, GRVT, GPMP) pull on particles. Off by default, as in the original."><input type="checkbox" id="powder-newton"> Newtonian gravity</label>
 <button id="powder-zone">Move grid to view</button><button id="powder-clear">Clear powder</button>
 <span id="powder-readout">Hover the grid to inspect.</span><small id="powder-status"></small><small>◦ = static properties only (state changes, flammability, heat); this material's special reaction code is not ported yet.</small>`;
     o.viewport.append(this.panel);
@@ -59,13 +63,35 @@ export class PowderUI {
     $<HTMLInputElement>('#powder-radius').oninput = e => { this.radius = Number((e.target as HTMLInputElement).value); $('#powder-radius-value').textContent = String(this.radius); };
     $<HTMLSelectElement>('#powder-view').onchange = e => { if (this.layer) this.layer.view = (e.target as HTMLSelectElement).value as PowderView; };
     $<HTMLInputElement>('#powder-run').onchange = e => { o.world.enabled = (e.target as HTMLInputElement).checked; };
+    $<HTMLInputElement>('#powder-newton').onchange = e => { const n = o.world.sim.newton; n.enabled = (e.target as HTMLInputElement).checked; n.forceRecalc = true; };
     $<HTMLButtonElement>('#powder-zone').onclick = () => this.placeAtView();
     $<HTMLButtonElement>('#powder-clear').onclick = () => { o.world.clear(); this.layer?.update(true); o.toast('Powder grid cleared'); };
     this.button.onclick = () => this.setActive(!this.active);
     window.addEventListener('keydown', e => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || (document.querySelector('dialog[open]'))) return;
       if (e.key.toLowerCase() === 'p' && !e.repeat) this.setActive(!this.active);
+      if (this.stickKey(e, true)) e.preventDefault();
     });
+    window.addEventListener('keyup', e => { if (this.stickKey(e, false)) e.preventDefault(); });
+  }
+
+  /** Arrow keys drive STKM and W/A/S/D drive STKM2 (GameController::KeyPress). Only taken while that stickman exists and the grid runs. */
+  private stickKey(e: KeyboardEvent, down: boolean): boolean {
+    if (!this.o.world.enabled || e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return false;
+    const sim = this.o.world.sim;
+    const maps: [Player, Record<string, number>, number][] = [
+      [sim.player, { ArrowLeft: COMM.LEFT, ArrowRight: COMM.RIGHT, ArrowUp: COMM.JUMP, ArrowDown: COMM.USE }, sim.elementCount[PT.STKM]],
+      [sim.player2, { KeyA: COMM.LEFT, KeyD: COMM.RIGHT, KeyW: COMM.JUMP, KeyS: COMM.USE }, sim.elementCount[PT.STKM2]],
+    ];
+    for (const [player, keys, present] of maps) {
+      const bit = keys[e.code];
+      if (!bit || (!present && down)) continue;
+      if (e.repeat && down) return true;
+      if (down) player.press(bit); else player.release(bit);
+      return !!present;
+    }
+    return false;
   }
 
   private ensureLayer(): PowderLayer {

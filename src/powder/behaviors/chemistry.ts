@@ -1,6 +1,7 @@
 /* Water family, gases, acids, plants and coal. Ported from the corresponding
  * src/simulation/elements/*.cpp files of The Powder Toy (GPL-3.0). */
 import { ELEMENTS, ID, MAX_TEMP, PT, TYP, TYPE_PART, TYPE_SOLID } from '../elements';
+import { plntTree } from './plants';
 import type { PowderSim } from '../sim';
 import { restrictTemp, type UpdateFn } from '../sim';
 
@@ -301,7 +302,19 @@ export const o2: Hook = (s, i, x, y) => {
       s.createPart(i, x, y, PT.FIRE); s.temp[i] += s.rng.between(0, 99); s.tmp[i] |= 2;
     }
   }
-  // The antimatter-style O2 -> BRMT+NEUT+PHOT+GRVT branch requires a Newtonian gravity field, which is not simulated here.
+  const c = s.cell(x, y);
+  if (s.temp[i] > 9973.15 && s.pv[c] > 250) {
+    const gx = s.newton.forceX[c], gy = s.newton.forceY[c];
+    if (gx * gx + gy * gy > 400 && s.rng.chance(1, 5)) {
+      s.createPart(i, x, y, PT.BRMT);
+      let j = s.createPart(-3, x, y, PT.NEUT); if (j !== -1) s.temp[j] = MAX_TEMP;
+      j = s.createPart(-3, x, y, PT.PHOT); if (j !== -1) { s.temp[j] = MAX_TEMP; s.tmp[j] = 1; }
+      const rx = x + s.rng.between(-1, 1), ry = y + s.rng.between(-1, 1), r = TYP(s.pmap[ry * s.XRES + rx]);
+      if (s.canMove[PT.PLSM * 512 + r] || r === PT.O2) { j = s.createPart(-3, rx, ry, PT.PLSM); if (j > -1) { s.temp[j] = MAX_TEMP; s.tmp[j] |= 4; } }
+      j = s.createPart(-3, x, y, PT.GRVT); if (j !== -1) s.temp[j] = MAX_TEMP;
+      s.temp[i] = MAX_TEMP; s.pv[c] = 256;
+    }
+  }
 };
 
 export const h2: Hook = (s, i, x, y) => {
@@ -396,9 +409,9 @@ export const vine: Hook = (s, i, x, y) => {
   if (s.temp[i] > 350 && s.temp[i] > s.tmp2[i]) s.tmp2[i] = s.temp[i] | 0;
 };
 
-/** PLNT: only the ordinary (non tree-growth) branch is ported; ctype&1 genome growth needs SEED. */
+/** PLNT: ordinary branch here; the ctype&1 tree-growth branch lives in plants.ts. */
 export const plnt: Hook = (s, i, x, y, surroundSpace) => {
-  if (s.ctype[i] & 1) return false;
+  if (s.ctype[i] & 1) return plntTree(s, i, x, y);
   for (let rx = -1; rx <= 1; rx++) for (let ry = -1; ry <= 1; ry++) {
     if (!rx && !ry) continue;
     const r = near(s, x, y, rx, ry), rid = ID(r);
